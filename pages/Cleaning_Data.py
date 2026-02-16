@@ -38,6 +38,25 @@ def load_dataframe_from_source(uploaded_file, github_url: str):
     return None
 
 
+def list_project_folders(base_path: str, max_depth: int = 3):
+    folders = ["."]
+    base_path = os.path.abspath(base_path)
+    base_depth = base_path.rstrip(os.sep).count(os.sep)
+    for root, dirnames, _ in os.walk(base_path):
+        depth = root.rstrip(os.sep).count(os.sep) - base_depth
+        if depth >= max_depth:
+            dirnames[:] = []
+            continue
+        dirnames[:] = [
+            d for d in dirnames
+            if not d.startswith(".") and d not in {"venv", "__pycache__", ".git"}
+        ]
+        for d in dirnames:
+            rel = os.path.relpath(os.path.join(root, d), base_path)
+            folders.append(rel)
+    return sorted(set(folders))
+
+
 # ------------------------------------------------------------------
 # 1. Data Source (Upload or GitHub)
 # ------------------------------------------------------------------
@@ -56,7 +75,9 @@ if "df" not in st.session_state:
         load_from_github = st.button("Load from GitHub")
 
     if uploaded_file is not None:
-        st.session_state.df = load_dataframe_from_source(uploaded_file, "")
+        loaded_df = load_dataframe_from_source(uploaded_file, "")
+        st.session_state.df_original = loaded_df.copy()
+        st.session_state.df = loaded_df.copy()
         st.rerun()
 
     if load_from_github:
@@ -65,7 +86,8 @@ if "df" not in st.session_state:
             if df is None:
                 st.error("Please enter a valid GitHub URL.")
             else:
-                st.session_state.df = df
+                st.session_state.df_original = df.copy()
+                st.session_state.df = df.copy()
                 st.rerun()
         except Exception as e:
             st.error(f"Failed to load from GitHub: {e}")
@@ -80,110 +102,168 @@ else:
 # 2. Cleaning and Preview Tools
 # ------------------------------------------------------------------
 if "df" in st.session_state:
+    if "df_original" not in st.session_state:
+        st.session_state.df_original = st.session_state.df.copy()
+
     st.markdown("---")
-    col_tools, col_preview = st.columns([1, 2])
+    st.subheader("Original Data Preview")
+    st.dataframe(st.session_state.df_original, height=600, use_container_width=True)
+    with st.expander("Inspect Data Types"):
+        st.write(st.session_state.df_original.dtypes)
 
-    with col_tools:
-        st.subheader("Processing Tools")
+    st.markdown("---")
+    st.subheader("Processing Tools")
 
-        # --- 1. Drop Columns ---
-        with st.expander("1) Drop Columns"):
-            all_columns = st.session_state.df.columns.tolist()
-            cols_to_drop = st.multiselect("Select columns to drop:", options=all_columns)
+    # --- 1. Drop Columns ---
+    with st.expander("1) Drop Columns"):
+        all_columns = st.session_state.df.columns.tolist()
+        cols_to_drop = st.multiselect("Select columns to drop:", options=all_columns)
 
-            if st.button("Confirm Drop"):
-                if cols_to_drop:
-                    st.session_state.df.drop(columns=cols_to_drop, inplace=True)
-                    st.session_state.df.to_csv("Data_Dropped_Columns.csv", index=False, encoding="utf-8-sig")
-                    st.success("Columns dropped successfully.")
-                    st.rerun()
+        if st.button("Confirm Drop"):
+            if cols_to_drop:
+                st.session_state.df.drop(columns=cols_to_drop, inplace=True)
+                st.session_state.df.to_csv("Data_Dropped_Columns.csv", index=False, encoding="utf-8-sig")
+                st.success("Columns dropped successfully.")
+                st.rerun()
 
-        # --- 2. Encoding ---
-        with st.expander("2) Encode Text Columns (One-Hot / Label)"):
-            obj_cols = st.session_state.df.select_dtypes(include=["object"]).columns.tolist()
-            if obj_cols:
-                st.write(f"Available object columns: `{obj_cols}`")
-                st.metric("Object Columns Count", len(obj_cols))
+    # --- 2. Encoding ---
+    with st.expander("2) Encode Text Columns (One-Hot / Label)"):
+        obj_cols = st.session_state.df.select_dtypes(include=["object"]).columns.tolist()
+        if obj_cols:
+            st.write(f"Available object columns: `{obj_cols}`")
+            st.metric("Object Columns Count", len(obj_cols))
 
-                object_summary = pd.DataFrame(
-                    {
-                        "column": obj_cols,
-                        "non_null": [int(st.session_state.df[col].notna().sum()) for col in obj_cols],
-                        "nulls": [int(st.session_state.df[col].isna().sum()) for col in obj_cols],
-                        "unique_values": [int(st.session_state.df[col].nunique(dropna=True)) for col in obj_cols],
-                    }
+            object_summary = pd.DataFrame(
+                {
+                    "column": obj_cols,
+                    "non_null": [int(st.session_state.df[col].notna().sum()) for col in obj_cols],
+                    "nulls": [int(st.session_state.df[col].isna().sum()) for col in obj_cols],
+                    "unique_values": [int(st.session_state.df[col].nunique(dropna=True)) for col in obj_cols],
+                }
+            )
+            st.dataframe(object_summary, use_container_width=True, height=min(320, 38 * (len(obj_cols) + 1)))
+
+            view_col = st.selectbox("Inspect object column values:", options=obj_cols, key="object_view_col")
+            if view_col:
+                st.write(f"First values in `{view_col}`:")
+                st.dataframe(st.session_state.df[[view_col]].head(20), use_container_width=True, height=260)
+
+                st.write("Value frequencies:")
+                value_counts_df = (
+                    st.session_state.df[view_col].astype(str).value_counts(dropna=False).reset_index()
                 )
-                st.dataframe(object_summary, use_container_width=True, height=min(320, 38 * (len(obj_cols) + 1)))
+                value_counts_df.columns = [view_col, "count"]
+                st.dataframe(value_counts_df.head(20), use_container_width=True, height=260)
 
-                view_col = st.selectbox("Inspect object column values:", options=obj_cols, key="object_view_col")
-                if view_col:
-                    st.write(f"First values in `{view_col}`:")
-                    st.dataframe(st.session_state.df[[view_col]].head(20), use_container_width=True, height=260)
+            method = st.radio("Encoding method:", ["One-Hot Encoding", "Label Encoding"])
+            selected_enc = st.multiselect("Select columns to encode:", options=obj_cols)
+            output_file_name = st.text_input(
+                "Final processed file name (CSV):",
+                value=st.session_state.get("encoded_output_file", "final_process_encoded_data.csv"),
+            )
+            if not output_file_name.strip():
+                output_file_name = "final_process_encoded_data.csv"
+            if not output_file_name.lower().endswith(".csv"):
+                output_file_name = f"{output_file_name}.csv"
 
-                    st.write("Value frequencies:")
-                    value_counts_df = (
-                        st.session_state.df[view_col].astype(str).value_counts(dropna=False).reset_index()
+            if selected_enc:
+                st.write("Sample before encoding:")
+                st.dataframe(st.session_state.df[selected_enc].head(10), use_container_width=True, height=230)
+
+                if method == "One-Hot Encoding":
+                    onehot_preview = pd.get_dummies(
+                        st.session_state.df[selected_enc].head(10),
+                        columns=selected_enc,
+                        drop_first=True,
+                        dtype=int,
                     )
-                    value_counts_df.columns = [view_col, "count"]
-                    st.dataframe(value_counts_df.head(20), use_container_width=True, height=260)
+                    st.write("Sample after One-Hot Encoding:")
+                    st.dataframe(onehot_preview, use_container_width=True, height=260)
+                else:
+                    st.write("Label mapping per selected column:")
+                    for col in selected_enc:
+                        le_preview = LabelEncoder()
+                        series_as_str = st.session_state.df[col].astype(str)
+                        le_preview.fit(series_as_str)
+                        mapping_df = pd.DataFrame(
+                            {
+                                "value": le_preview.classes_,
+                                "encoded": range(len(le_preview.classes_)),
+                            }
+                        )
+                        st.write(f"`{col}` mapping")
+                        st.dataframe(mapping_df, use_container_width=True, height=220)
 
-                method = st.radio("Encoding method:", ["One-Hot Encoding", "Label Encoding"])
-                selected_enc = st.multiselect("Select columns to encode:", options=obj_cols)
+                    label_preview = st.session_state.df[selected_enc].head(10).copy()
+                    for col in selected_enc:
+                        le_preview = LabelEncoder()
+                        label_preview[col] = le_preview.fit_transform(label_preview[col].astype(str))
+                    st.write("Sample after Label Encoding:")
+                    st.dataframe(label_preview, use_container_width=True, height=230)
 
+            if st.button("Apply Encoding"):
                 if selected_enc:
-                    st.write("Sample before encoding:")
-                    st.dataframe(st.session_state.df[selected_enc].head(10), use_container_width=True, height=230)
-
                     if method == "One-Hot Encoding":
-                        onehot_preview = pd.get_dummies(
-                            st.session_state.df[selected_enc].head(10),
+                        st.session_state.df = pd.get_dummies(
+                            st.session_state.df,
                             columns=selected_enc,
                             drop_first=True,
                             dtype=int,
                         )
-                        st.write("Sample after One-Hot Encoding:")
-                        st.dataframe(onehot_preview, use_container_width=True, height=260)
                     else:
-                        st.write("Label mapping per selected column:")
+                        le = LabelEncoder()
                         for col in selected_enc:
-                            le_preview = LabelEncoder()
-                            series_as_str = st.session_state.df[col].astype(str)
-                            le_preview.fit(series_as_str)
-                            mapping_df = pd.DataFrame(
-                                {
-                                    "value": le_preview.classes_,
-                                    "encoded": range(len(le_preview.classes_)),
-                                }
-                            )
-                            st.write(f"`{col}` mapping")
-                            st.dataframe(mapping_df, use_container_width=True, height=220)
+                            st.session_state.df[col] = le.fit_transform(st.session_state.df[col].astype(str))
 
-                        label_preview = st.session_state.df[selected_enc].head(10).copy()
-                        for col in selected_enc:
-                            le_preview = LabelEncoder()
-                            label_preview[col] = le_preview.fit_transform(label_preview[col].astype(str))
-                        st.write("Sample after Label Encoding:")
-                        st.dataframe(label_preview, use_container_width=True, height=230)
+                    st.session_state.df.to_csv("Data_Encoded.csv", index=False, encoding="utf-8-sig")
+                    st.session_state.encoding_applied = True
+                    st.session_state.last_encoding_method = method
+                    st.session_state.encoded_output_file = output_file_name
+                    st.session_state.show_encoded_preview = False
+                    st.success("Encoding applied successfully.")
+                    st.rerun()
+        else:
+            st.write("No object columns found.")
 
-                if st.button("Apply Encoding"):
-                    if selected_enc:
-                        if method == "One-Hot Encoding":
-                            st.session_state.df = pd.get_dummies(
-                                st.session_state.df,
-                                columns=selected_enc,
-                                drop_first=True,
-                                dtype=int,
-                            )
-                        else:
-                            le = LabelEncoder()
-                            for col in selected_enc:
-                                st.session_state.df[col] = le.fit_transform(st.session_state.df[col].astype(str))
+        if st.session_state.get("encoding_applied", False):
+            st.markdown("---")
+            st.subheader("Encoded Data Result")
+            st.caption(f"Method: {st.session_state.get('last_encoding_method', 'Unknown')}")
+            if st.button("Load and Preview Encoded Data", key="load_encoded_preview_btn"):
+                st.session_state.show_encoded_preview = True
 
-                        st.session_state.df.to_csv("Data_Encoded.csv", index=False, encoding="utf-8-sig")
-                        st.success("Encoding applied successfully.")
-                        st.rerun()
-            else:
-                st.write("No object columns found.")
+            if st.session_state.get("show_encoded_preview", False):
+                st.dataframe(st.session_state.df.head(30), use_container_width=True, height=320)
+                default_name = st.session_state.get("encoded_output_file", "final_process_encoded_data.csv")
+                project_folders = list_project_folders(os.getcwd(), max_depth=4)
+                selected_folder = st.selectbox(
+                    "Save inside project folder:",
+                    options=project_folders,
+                    index=0,
+                    key="encoded_project_folder",
+                )
+                custom_name = st.text_input(
+                    "File name:",
+                    value=default_name,
+                    key="encoded_project_file_name",
+                ).strip()
+                if not custom_name:
+                    custom_name = default_name
+                if not custom_name.lower().endswith(".csv"):
+                    custom_name = f"{custom_name}.csv"
+
+                target_path = os.path.join(os.getcwd(), selected_folder, custom_name)
+                st.caption(f"Target path: {target_path}")
+
+                if st.button("Save inside Project", key="save_encoded_to_project_btn"):
+                    try:
+                        target_dir = os.path.dirname(target_path)
+                        if target_dir:
+                            os.makedirs(target_dir, exist_ok=True)
+                        st.session_state.df.to_csv(target_path, index=False, encoding="utf-8-sig")
+                        st.success(f"File saved to: {target_path}")
+                    except Exception as e:
+                        st.error(f"Failed to save file: {e}")
 
         # --- 3. Date Conversion ---
         with st.expander("3) Convert Date Columns"):
@@ -283,10 +363,3 @@ if "df" in st.session_state:
 
                 st.session_state.split_done = True
                 st.success("Train/test files saved successfully.")
-
-    with col_preview:
-        st.subheader("Current Data Preview")
-        st.dataframe(st.session_state.df, height=600, use_container_width=True)
-
-        with st.expander("Inspect Data Types"):
-            st.write(st.session_state.df.dtypes)

@@ -14,20 +14,62 @@ st.title("🛠️ مرحلة التنظيف النهائي وتحميل المل
 def convert_df(df_to_convert):
     return df_to_convert.to_csv(index=False).encode('utf-8-sig')
 
+
+def normalize_github_url(url: str) -> str:
+    url = url.strip()
+    if "github.com" in url and "/blob/" in url:
+        return url.replace("https://github.com/", "https://raw.githubusercontent.com/").replace("/blob/", "/")
+    return url
+
+
+def load_dataframe_from_source(uploaded_file, github_url: str):
+    if uploaded_file is not None:
+        file_ext = os.path.splitext(uploaded_file.name)[1].lower()
+        if file_ext in [".xlsx", ".xls"]:
+            return pd.read_excel(uploaded_file)
+        return pd.read_csv(uploaded_file, encoding='utf-8', encoding_errors='ignore')
+
+    if github_url and github_url.strip():
+        normalized_url = normalize_github_url(github_url)
+        lower_url = normalized_url.lower()
+        if lower_url.endswith((".xlsx", ".xls")):
+            response = pd.read_excel(normalized_url)
+            return response
+        return pd.read_csv(normalized_url, encoding='utf-8', encoding_errors='ignore')
+
+    return None
+
 # ------------------------------------------------------------------
 # 2. نظام إدارة رفع الملفات (يختفي بعد الرفع)
 # ------------------------------------------------------------------
 if 'df' not in st.session_state:
     st.info("👋 يرجى رفع ملف بيانات للبدء.")
-    uploaded_file = st.file_uploader("اختر ملف CSV أو Excel", type=['csv', 'xlsx', 'xls'])
-    
+    upload_col, github_col = st.columns(2)
+
+    with upload_col:
+        uploaded_file = st.file_uploader("اختر ملف CSV أو Excel", type=['csv', 'xlsx', 'xls'])
+
+    with github_col:
+        github_url = st.text_input(
+            "أو ضع رابط GitHub مباشر/Raw للملف",
+            placeholder="https://github.com/user/repo/blob/main/data.csv",
+        )
+        load_from_github = st.button("تحميل من GitHub")
+
     if uploaded_file is not None:
-        file_ext = os.path.splitext(uploaded_file.name)[1].lower()
-        if file_ext in [".xlsx", ".xls"]:
-            st.session_state.df = pd.read_excel(uploaded_file)
-        else:
-            st.session_state.df = pd.read_csv(uploaded_file, encoding='utf-8', encoding_errors='ignore')
-        st.rerun() 
+        st.session_state.df = load_dataframe_from_source(uploaded_file, "")
+        st.rerun()
+
+    if load_from_github:
+        try:
+            df = load_dataframe_from_source(None, github_url)
+            if df is None:
+                st.error("يرجى إدخال رابط GitHub صحيح.")
+            else:
+                st.session_state.df = df
+                st.rerun()
+        except Exception as e:
+            st.error(f"فشل التحميل من GitHub: {e}")
 else:
     if st.sidebar.button("🔄 رفع ملف مختلف"):
         for key in list(st.session_state.keys()):
@@ -63,6 +105,33 @@ if 'df' in st.session_state:
             obj_cols = st.session_state.df.select_dtypes(include=['object']).columns.tolist()
             if obj_cols:
                 st.write(f"الأعمدة المتاحة: `{obj_cols}`")
+                st.metric("عدد الأعمدة النصية (object)", len(obj_cols))
+                object_summary = pd.DataFrame({
+                    "column": obj_cols,
+                    "non_null": [int(st.session_state.df[col].notna().sum()) for col in obj_cols],
+                    "nulls": [int(st.session_state.df[col].isna().sum()) for col in obj_cols],
+                    "unique_values": [int(st.session_state.df[col].nunique(dropna=True)) for col in obj_cols],
+                })
+                st.dataframe(object_summary, use_container_width=True, height=min(320, 38 * (len(obj_cols) + 1)))
+
+                view_col = st.selectbox("عرض قيم عمود نصي:", options=obj_cols, key="object_view_col")
+                if view_col:
+                    st.write(f"أول قيم من العمود `{view_col}`:")
+                    st.dataframe(
+                        st.session_state.df[[view_col]].head(20),
+                        use_container_width=True,
+                        height=260,
+                    )
+                    st.write("تكرار القيم:")
+                    value_counts_df = (
+                        st.session_state.df[view_col]
+                        .astype(str)
+                        .value_counts(dropna=False)
+                        .reset_index()
+                    )
+                    value_counts_df.columns = [view_col, "count"]
+                    st.dataframe(value_counts_df.head(20), use_container_width=True, height=260)
+
                 method = st.radio("نوع الترميز:", ["One-Hot Encoding", "Label Encoding"])
                 selected_enc = st.multiselect("اختر الأعمدة:", options=obj_cols)
                 

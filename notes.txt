@@ -1,0 +1,136 @@
+You can run this on same file of Project write CMD  or VSC
+
+python --version                            -> for checking the python                                                                                    is installed on the PC or not
+python -m pip install streamlit      	    -> for install streamlite on pc
+
+python -m streamlit --version               -> for streamlit version
+
+py -m streamlit run analysis.py             -> for run the project
+
+
+-------------------------------------------------------------------------------
+using file.bat
+🛠️ إنشاء ملف BAT (أسهل طريقة)
+✅ الطريقة 1: باستخدام Notepad (الموصى بها)
+1️⃣ افتح Notepad
+
+اضغط Start
+
+اكتب: Notepad
+
+افتحه
+
+2️⃣ انسخ هذا النص كاملًا 👇
+@echo off
+title Streamlit Dashboard
+
+cd /d "%~dp0"
+
+py --version >nul 2>&1
+if errorlevel 1 (
+    echo Python is not installed.
+    echo Please install Python from https://www.python.org
+    pause
+    exit /b
+)
+
+py -m pip install streamlit pandas matplotlib seaborn openpyxl
+
+py -m streamlit run app.py
+
+pause
+
+3️⃣ احفظ الملف (مهم جدًا)
+
+في Notepad:
+
+File → Save As
+
+اختر نفس مجلد app.py
+
+File name:
+
+run_app.bat
+
+
+Save as type:
+
+All Files
+
+
+Encoding:
+
+UTF-8
+
+
+اضغط Save
+
+⚠️ تأكد أن الاسم ليس:
+
+run_app.bat.txt
+
+👀 كيف تتأكد أنه BAT؟
+
+أيقونته ⚙️ أو سوداء
+
+اسمه: run_app.bat
+
+ليس ملف نصي
+
+لو شفت:
+
+run_app.bat.txt
+
+
+→ فعل:
+View → File name extensions ✔️
+ثم احذف .txt
+
+▶️ تشغيل الملف
+
+ضع في نفس المجلد:
+
+app.py
+
+run_app.bat
+
+دبل كليك على run_app.bat
+
+انتظر دقيقة
+
+المتصفح سيفتح تلقائيًا 🎉
+
+❓ ماذا يفعل هذا الملف؟
+
+يتأكد إن Python موجود
+
+يثبّت Streamlit
+
+يشغّل التطبيق
+
+لا تحتاج CMD ولا أوامر
+
+-------------------------------------------------------------------------------
+open without show CMD widows
+🔹 حل 2 (احترافي – بدون CMD تمامًا)
+
+نستخدم ملف VBS لتشغيل BAT مخفيًا:
+
+1️⃣ أنشئ ملف:
+run_hidden.vbs
+
+2️⃣ محتواه:
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run chr(34) & "run_app.bat" & chr(34), 0
+Set WshShell = Nothing
+
+3️⃣ شغّل:
+
+👉 دبل كليك على run_hidden.vbs
+
+✔️ لا نافذة
+✔️ لا CMD
+✔️ التطبيق يفتح في المتصفح فقط
+------------------------------------------------------------------------------------
+to updat python write in cmd
+ python.exe -m pip install --upgrade pip

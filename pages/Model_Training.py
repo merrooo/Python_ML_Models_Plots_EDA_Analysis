@@ -23,7 +23,8 @@ if os.path.exists("X_train.csv"):
     with col2:
         model_name = st.selectbox("اختر النموذج:", ["Random Forest", "Linear/Logistic Regression"])
 
-    if st.button("🚀 بدء تدريب النموذج"):
+    if st.checkbox("🚀 بدء تدريب النموذج", key="start_training_chk"):
+        st.session_state.start_training_chk = False
         with st.spinner("جاري التدريب..."):
             if problem_type == "تصنيف (Classification)":
                 model = RandomForestClassifier(random_state=42)

@@ -57,6 +57,46 @@ def list_project_folders(base_path: str, max_depth: int = 3):
     return sorted(set(folders))
 
 
+def get_iqr_mask(series: pd.Series):
+    q1, q3 = series.quantile([0.25, 0.75])
+    iqr = q3 - q1
+    if pd.isna(iqr) or iqr == 0:
+        return pd.Series(False, index=series.index), q1, q3
+    low, up = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+    mask = (series < low) | (series > up)
+    return mask, low, up
+
+
+def apply_outlier_strategy_until_stable(
+    df: pd.DataFrame, column: str, strategy: str, max_iter: int = 10
+):
+    df_work = df.copy()
+    iterations = 0
+
+    while iterations < max_iter:
+        mask, low, up = get_iqr_mask(df_work[column])
+        out_count = int(mask.sum())
+        if out_count == 0:
+            break
+
+        iterations += 1
+        if strategy == "Mean Replace":
+            df_work.loc[mask, column] = df_work[column].mean()
+        elif strategy == "Drop Rows":
+            df_work = df_work.loc[~mask].copy()
+        elif strategy == "IQR Capping (Winsorize)":
+            df_work[column] = df_work[column].clip(lower=low, upper=up)
+        else:
+            qt = QuantileTransformer(
+                output_distribution="normal",
+                n_quantiles=min(len(df_work), 100),
+            )
+            df_work[column] = qt.fit_transform(df_work[[column]].values).flatten()
+            break
+
+    return df_work, iterations
+
+
 # ------------------------------------------------------------------
 # 1. Data Source (Upload or GitHub)
 # ------------------------------------------------------------------
@@ -72,7 +112,7 @@ if "df" not in st.session_state:
             "Or paste a direct/Raw GitHub file URL",
             placeholder="https://github.com/user/repo/blob/main/data.csv",
         )
-        load_from_github = st.button("Load from GitHub")
+        load_from_github = st.checkbox("Load from GitHub", key="load_from_github_chk")
 
     if uploaded_file is not None:
         loaded_df = load_dataframe_from_source(uploaded_file, "")
@@ -81,6 +121,7 @@ if "df" not in st.session_state:
         st.rerun()
 
     if load_from_github:
+        st.session_state.load_from_github_chk = False
         try:
             df = load_dataframe_from_source(None, github_url)
             if df is None:
@@ -92,7 +133,8 @@ if "df" not in st.session_state:
         except Exception as e:
             st.error(f"Failed to load from GitHub: {e}")
 else:
-    if st.sidebar.button("Upload Different File"):
+    if st.sidebar.checkbox("Upload Different File", key="upload_different_file_chk"):
+        st.session_state.upload_different_file_chk = False
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
@@ -119,7 +161,8 @@ if "df" in st.session_state:
         all_columns = st.session_state.df.columns.tolist()
         cols_to_drop = st.multiselect("Select columns to drop:", options=all_columns)
 
-        if st.button("Confirm Drop"):
+        if st.checkbox("Confirm Drop", key="confirm_drop_chk"):
+            st.session_state.confirm_drop_chk = False
             if cols_to_drop:
                 st.session_state.df.drop(columns=cols_to_drop, inplace=True)
                 st.session_state.df.to_csv("Data_Dropped_Columns.csv", index=False, encoding="utf-8-sig")
@@ -201,7 +244,8 @@ if "df" in st.session_state:
                     st.write("Sample after Label Encoding:")
                     st.dataframe(label_preview, use_container_width=True, height=230)
 
-            if st.button("Apply Encoding"):
+            if st.checkbox("Apply Encoding", key="apply_encoding_chk"):
+                st.session_state.apply_encoding_chk = False
                 if selected_enc:
                     if method == "One-Hot Encoding":
                         st.session_state.df = pd.get_dummies(
@@ -219,6 +263,7 @@ if "df" in st.session_state:
                     st.session_state.encoding_applied = True
                     st.session_state.last_encoding_method = method
                     st.session_state.encoded_output_file = output_file_name
+                    st.session_state.encoding_result_df = st.session_state.df.copy()
                     st.session_state.show_encoded_preview = False
                     st.success("Encoding applied successfully.")
                     st.rerun()
@@ -229,11 +274,13 @@ if "df" in st.session_state:
             st.markdown("---")
             st.subheader("Encoded Data Result")
             st.caption(f"Method: {st.session_state.get('last_encoding_method', 'Unknown')}")
-            if st.button("Load and Preview Encoded Data", key="load_encoded_preview_btn"):
+            if st.checkbox("Load and Preview Encoded Data", key="load_encoded_preview_chk"):
+                st.session_state.load_encoded_preview_chk = False
                 st.session_state.show_encoded_preview = True
 
             if st.session_state.get("show_encoded_preview", False):
-                st.dataframe(st.session_state.df.head(30), use_container_width=True, height=320)
+                encoded_preview_df = st.session_state.get("encoding_result_df", st.session_state.df)
+                st.dataframe(encoded_preview_df.head(30), use_container_width=True, height=320)
                 default_name = st.session_state.get("encoded_output_file", "final_process_encoded_data.csv")
                 project_folders = list_project_folders(os.getcwd(), max_depth=4)
                 selected_folder = st.selectbox(
@@ -260,106 +307,303 @@ if "df" in st.session_state:
                         target_dir = os.path.dirname(target_path)
                         if target_dir:
                             os.makedirs(target_dir, exist_ok=True)
-                        st.session_state.df.to_csv(target_path, index=False, encoding="utf-8-sig")
+                        encoded_save_df = st.session_state.get("encoding_result_df", st.session_state.df)
+                        encoded_save_df.to_csv(target_path, index=False, encoding="utf-8-sig")
                         st.success(f"File saved to: {target_path}")
                     except Exception as e:
                         st.error(f"Failed to save file: {e}")
 
-        # --- 3. Date Conversion ---
-        with st.expander("3) Convert Date Columns"):
-            if st.button("Extract Date Parts"):
-                df_temp = st.session_state.df.copy()
-                for col in df_temp.columns:
-                    if df_temp[col].dtype == "object":
-                        try:
-                            df_temp[col] = pd.to_datetime(df_temp[col])
-                            df_temp[f"{col}_year"] = df_temp[col].dt.year
-                            df_temp[f"{col}_month"] = df_temp[col].dt.month
-                            df_temp[f"{col}_day"] = df_temp[col].dt.day
-                            df_temp.drop(columns=[col], inplace=True)
-                        except Exception:
-                            continue
+    # --- 3. Date Conversion ---
+    with st.expander("3) Convert Date Columns"):
+        if st.checkbox("Extract Date Parts", key="extract_date_parts_chk"):
+            st.session_state.extract_date_parts_chk = False
+            df_temp = st.session_state.df.copy()
+            converted_cols = []
+            candidate_cols = df_temp.select_dtypes(include=["object", "string", "category"]).columns.tolist()
+
+            for col in candidate_cols:
+                series = df_temp[col]
+                parsed = pd.to_datetime(series, errors="coerce", format="mixed")
+                parsed_ratio = float(parsed.notna().mean()) if len(parsed) else 0.0
+                if parsed_ratio >= 0.6 and parsed.notna().sum() > 0:
+                    df_temp[f"{col}_year"] = parsed.dt.year
+                    df_temp[f"{col}_month"] = parsed.dt.month
+                    df_temp[f"{col}_day"] = parsed.dt.day
+                    df_temp.drop(columns=[col], inplace=True)
+                    converted_cols.append(col)
+
+            if converted_cols:
                 st.session_state.df = df_temp
-                st.success("Date conversion completed.")
+                st.session_state.date_applied = True
+                st.session_state.date_result_df = df_temp.copy()
+                st.session_state.date_converted_cols = converted_cols
+                st.success(f"Date conversion completed for: {', '.join(converted_cols)}")
                 st.rerun()
+            else:
+                st.warning("No date-like columns were detected in the current working data.")
 
-        # --- 4. Outliers ---
-        with st.expander("4) Outlier Handling"):
-            num_cols = st.session_state.df.select_dtypes(include=[np.number]).columns.tolist()
-            if num_cols:
-                target_col = st.selectbox("Select numeric column:", options=num_cols)
+        if st.session_state.get("date_applied", False):
+            st.markdown("---")
+            st.subheader("Date Conversion Result")
+            st.caption(
+                "Converted columns: "
+                + ", ".join(st.session_state.get("date_converted_cols", []))
+            )
+            date_preview_df = st.session_state.get("date_result_df", st.session_state.df)
+            st.dataframe(date_preview_df.head(30), use_container_width=True, height=320)
 
-                q1, q3 = st.session_state.df[target_col].quantile([0.25, 0.75])
-                iqr = q3 - q1
-                low, up = q1 - 1.5 * iqr, q3 + 1.5 * iqr
-                mask = (st.session_state.df[target_col] < low) | (st.session_state.df[target_col] > up)
-                outliers = st.session_state.df[mask]
-
-                st.metric(f"Outliers in {target_col}", outliers.shape[0])
-                if not outliers.empty:
-                    st.dataframe(outliers, height=200)
-
-                st.divider()
-                strat = st.radio(
-                    "Strategy:",
-                    ["Mean Replace", "Drop Rows", "Quantile Transform"],
-                    horizontal=True,
+    # --- 4. Outliers ---
+    with st.expander("4) Outlier Handling"):
+        num_cols = st.session_state.df.select_dtypes(include=[np.number]).columns.tolist()
+        if num_cols:
+            outlier_stats = []
+            for col in num_cols:
+                q1_col, q3_col = st.session_state.df[col].quantile([0.25, 0.75])
+                iqr_col = q3_col - q1_col
+                low_col, up_col = q1_col - 1.5 * iqr_col, q3_col + 1.5 * iqr_col
+                col_mask = (st.session_state.df[col] < low_col) | (st.session_state.df[col] > up_col)
+                col_outlier_count = int(col_mask.sum())
+                outlier_stats.append(
+                    {
+                        "column": col,
+                        "outlier_count": col_outlier_count,
+                        "has_outliers": col_outlier_count > 0,
+                    }
                 )
 
-                c1, c2 = st.columns(2)
-                with c1:
-                    if st.button(f"Apply on {target_col}"):
-                        if strat == "Mean Replace":
-                            st.session_state.df.loc[mask, target_col] = st.session_state.df[target_col].mean()
-                        elif strat == "Drop Rows":
-                            st.session_state.df = st.session_state.df[~mask]
-                        else:
-                            qt = QuantileTransformer(
-                                output_distribution="normal",
-                                n_quantiles=min(len(st.session_state.df), 100),
-                            )
-                            st.session_state.df[target_col] = qt.fit_transform(
-                                st.session_state.df[[target_col]].values
-                            ).flatten()
-                        st.rerun()
+            outlier_stats_df = pd.DataFrame(outlier_stats)
+            outlier_stats_df["marker"] = outlier_stats_df["has_outliers"].map(
+                lambda x: "OUTLIERS" if x else ""
+            )
+            st.write("Outlier summary by numeric column:")
+            st.dataframe(
+                outlier_stats_df[["column", "outlier_count", "marker"]],
+                use_container_width=True,
+                height=min(320, 38 * (len(outlier_stats_df) + 1)),
+            )
 
-                with c2:
-                    if st.button("Apply to All Numeric Columns"):
-                        df_work = st.session_state.df.copy()
-                        for c in num_cols:
-                            cq1, cq3 = df_work[c].quantile([0.25, 0.75])
-                            ciqr = cq3 - cq1
-                            cl, cu = cq1 - 1.5 * ciqr, cq3 + 1.5 * ciqr
-                            cm = (df_work[c] < cl) | (df_work[c] > cu)
-                            if strat == "Mean Replace":
-                                df_work.loc[cm, c] = df_work[c].mean()
-                            elif strat == "Drop Rows":
-                                df_work = df_work[~cm]
-                            else:
-                                qt = QuantileTransformer(
-                                    output_distribution="normal",
-                                    n_quantiles=min(len(df_work), 100),
-                                )
-                                df_work[c] = qt.fit_transform(df_work[[c]].values).flatten()
+            col_option_map = {}
+            for _, row in outlier_stats_df.iterrows():
+                label = (
+                    f"{row['column']} [OUTLIERS: {int(row['outlier_count'])}]"
+                    if row["has_outliers"]
+                    else f"{row['column']}"
+                )
+                col_option_map[label] = row["column"]
+            outlier_cols_only = outlier_stats_df.loc[
+                outlier_stats_df["has_outliers"], "column"
+            ].tolist()
+
+            selected_label = st.selectbox("Select numeric column:", options=list(col_option_map.keys()))
+            target_col = col_option_map[selected_label]
+
+            q1, q3 = st.session_state.df[target_col].quantile([0.25, 0.75])
+            iqr = q3 - q1
+            low, up = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+            mask = (st.session_state.df[target_col] < low) | (st.session_state.df[target_col] > up)
+            outliers = st.session_state.df[mask]
+
+            st.metric(f"Outliers in {target_col}", outliers.shape[0])
+            if not outliers.empty:
+                st.write("Critical outlier samples (most extreme values):")
+                q1_center, q3_center = st.session_state.df[target_col].quantile([0.25, 0.75])
+                iqr_center = q3_center - q1_center
+                median_center = st.session_state.df[target_col].median()
+                scale = iqr_center if iqr_center and not np.isnan(iqr_center) else 1.0
+
+                critical_samples = outliers.copy()
+                critical_samples["_outlier_score"] = (
+                    (critical_samples[target_col] - median_center).abs() / scale
+                )
+                critical_samples = critical_samples.sort_values(
+                    by="_outlier_score", ascending=False
+                )
+
+                st.dataframe(
+                    critical_samples[[target_col, "_outlier_score"]].head(10),
+                    use_container_width=True,
+                    height=260,
+                )
+
+                low_outliers = outliers.sort_values(by=target_col, ascending=True).head(5)
+                high_outliers = outliers.sort_values(by=target_col, ascending=False).head(5)
+                c_low, c_high = st.columns(2)
+                with c_low:
+                    st.write("Lowest outlier samples:")
+                    st.dataframe(low_outliers[[target_col]], use_container_width=True, height=180)
+                with c_high:
+                    st.write("Highest outlier samples:")
+                    st.dataframe(high_outliers[[target_col]], use_container_width=True, height=180)
+
+            st.divider()
+            strat = st.radio(
+                "Choose strategy:",
+                [
+                    "Mean Replace",
+                    "Drop Rows",
+                    "Quantile Transform",
+                    "IQR Capping (Winsorize)",
+                ],
+                horizontal=True,
+                key="outlier_strategy_selected",
+            )
+            st.caption(f"Selected strategy: {strat}")
+
+            apply_scope = st.radio(
+                "Apply scope:",
+                ["Selected column only", "All columns with outliers"],
+                horizontal=True,
+            )
+
+            if st.checkbox("Apply Selected Strategy", key="apply_outlier_strategy_chk"):
+                st.session_state.apply_outlier_strategy_chk = False
+                if apply_scope == "Selected column only":
+                    updated_df, used_iters = apply_outlier_strategy_until_stable(
+                        st.session_state.df, target_col, strat
+                    )
+                    st.session_state.df = updated_df
+                    st.session_state.outlier_result_df = updated_df.copy()
+                    st.session_state.outlier_last_scope = target_col
+                else:
+                    df_work = st.session_state.df.copy()
+                    total_iters = 0
+                    for c in outlier_cols_only:
+                        df_work, used_iters_col = apply_outlier_strategy_until_stable(
+                            df_work, c, strat
+                        )
+                        total_iters += used_iters_col
+
+                    if not outlier_cols_only:
+                        st.info("No columns with outliers were found to apply this strategy.")
+                    else:
                         st.session_state.df = df_work
-                        st.rerun()
+                        st.session_state.outlier_result_df = df_work.copy()
+                        st.session_state.outlier_last_scope = "all columns with outliers"
+                        used_iters = total_iters
 
-        # --- 5. Train/Test Split ---
-        with st.expander("5) Split Data"):
-            target_var = st.selectbox("Target column (y):", options=st.session_state.df.columns.tolist())
-            size = st.slider("Test size:", 0.1, 0.5, 0.2)
-            if st.button("Run Final Split"):
-                X = st.session_state.df.drop(columns=[target_var])
-                y = st.session_state.df[target_var]
-                X = pd.get_dummies(X, drop_first=True, dtype=int)
-                X_train, X_test, y_train, y_test = train_test_split(
-                    X, y, test_size=size, random_state=42
+                if apply_scope == "Selected column only" or outlier_cols_only:
+                    st.session_state.outlier_applied = True
+                    st.session_state.outlier_last_strategy = strat
+                    st.session_state.outlier_last_iterations = used_iters
+                    st.session_state.outlier_result_file = "final_process_outlier_handled_data.csv"
+                    st.session_state.pop("outlier_preview_df", None)
+                    st.session_state.pop("outlier_preview_col", None)
+                    st.session_state.pop("outlier_preview_strategy", None)
+                    st.session_state.pop("outlier_preview_iters", None)
+                    st.rerun()
+
+            if st.checkbox("Preview Strategy Result", key="preview_outlier_strategy_chk"):
+                st.session_state.preview_outlier_strategy_chk = False
+                preview_df, preview_iters = apply_outlier_strategy_until_stable(
+                    st.session_state.df, target_col, strat
                 )
+                st.session_state.outlier_preview_df = preview_df
+                st.session_state.outlier_preview_col = target_col
+                st.session_state.outlier_preview_strategy = strat
+                st.session_state.outlier_preview_iters = preview_iters
 
-                X_train.to_csv("X_train.csv", index=False)
-                X_test.to_csv("X_test.csv", index=False)
-                y_train.to_csv("y_train.csv", index=False)
-                y_test.to_csv("y_test.csv", index=False)
+            if "outlier_preview_df" in st.session_state:
+                prev_col = st.session_state.get("outlier_preview_col", target_col)
+                prev_strat = st.session_state.get("outlier_preview_strategy", strat)
+                st.markdown("---")
+                st.write(f"Preview after `{prev_strat}` on `{prev_col}`:")
+                st.caption(f"Iterations used: {st.session_state.get('outlier_preview_iters', 0)}")
+                c_prev1, c_prev2 = st.columns(2)
+                with c_prev1:
+                    st.caption("Before")
+                    st.dataframe(
+                        st.session_state.df[[prev_col]].head(20),
+                        use_container_width=True,
+                        height=240,
+                    )
+                with c_prev2:
+                    st.caption("After (Preview)")
+                    st.dataframe(
+                        st.session_state.outlier_preview_df[[prev_col]].head(20),
+                        use_container_width=True,
+                        height=240,
+                    )
 
-                st.session_state.split_done = True
-                st.success("Train/test files saved successfully.")
+            if st.session_state.get("outlier_applied", False):
+                st.markdown("---")
+                st.subheader("Outlier Handling Result")
+                st.caption(
+                    f"Applied `{st.session_state.get('outlier_last_strategy', '')}` on "
+                    f"`{st.session_state.get('outlier_last_scope', '')}`"
+                )
+                st.caption(f"Iterations used: {st.session_state.get('outlier_last_iterations', 0)}")
+                outlier_result_df = st.session_state.get("outlier_result_df", st.session_state.df)
+                st.dataframe(outlier_result_df.head(30), use_container_width=True, height=320)
+
+                result_num_cols = outlier_result_df.select_dtypes(include=[np.number]).columns.tolist()
+                if result_num_cols:
+                    result_stats = []
+                    for c in result_num_cols:
+                        rq1, rq3 = outlier_result_df[c].quantile([0.25, 0.75])
+                        riqr = rq3 - rq1
+                        rlow, rup = rq1 - 1.5 * riqr, rq3 + 1.5 * riqr
+                        rmask = (outlier_result_df[c] < rlow) | (outlier_result_df[c] > rup)
+                        rc = int(rmask.sum())
+                        result_stats.append(
+                            {"column": c, "outlier_count": rc, "marker": "OUTLIERS" if rc > 0 else ""}
+                        )
+                    st.write("Outlier summary by numeric column (after apply):")
+                    st.caption("This table is recalculated from the current working data after each apply.")
+                    st.dataframe(
+                        pd.DataFrame(result_stats),
+                        use_container_width=True,
+                        height=min(320, 38 * (len(result_stats) + 1)),
+                    )
+
+                default_name = st.session_state.get(
+                    "outlier_result_file", "final_process_outlier_handled_data.csv"
+                )
+                project_folders = list_project_folders(os.getcwd(), max_depth=4)
+                selected_folder = st.selectbox(
+                    "Save inside project folder:",
+                    options=project_folders,
+                    index=0,
+                    key="outlier_project_folder",
+                )
+                custom_name = st.text_input(
+                    "File name:",
+                    value=default_name,
+                    key="outlier_project_file_name",
+                ).strip()
+                if not custom_name:
+                    custom_name = default_name
+                if not custom_name.lower().endswith(".csv"):
+                    custom_name = f"{custom_name}.csv"
+                target_path = os.path.join(os.getcwd(), selected_folder, custom_name)
+                st.caption(f"Target path: {target_path}")
+                if st.button("Save inside Project", key="save_outlier_to_project_btn"):
+                    try:
+                        target_dir = os.path.dirname(target_path)
+                        if target_dir:
+                            os.makedirs(target_dir, exist_ok=True)
+                        outlier_save_df = st.session_state.get("outlier_result_df", st.session_state.df)
+                        outlier_save_df.to_csv(target_path, index=False, encoding="utf-8-sig")
+                        st.success(f"File saved to: {target_path}")
+                    except Exception as e:
+                        st.error(f"Failed to save file: {e}")
+
+    # --- 5. Train/Test Split ---
+    with st.expander("5) Split Data"):
+        target_var = st.selectbox("Target column (y):", options=st.session_state.df.columns.tolist())
+        size = st.slider("Test size:", 0.1, 0.5, 0.2)
+        if st.checkbox("Run Final Split", key="run_final_split_chk"):
+            st.session_state.run_final_split_chk = False
+            X = st.session_state.df.drop(columns=[target_var])
+            y = st.session_state.df[target_var]
+            X = pd.get_dummies(X, drop_first=True, dtype=int)
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=size, random_state=42
+            )
+
+            X_train.to_csv("X_train.csv", index=False)
+            X_test.to_csv("X_test.csv", index=False)
+            y_train.to_csv("y_train.csv", index=False)
+            y_test.to_csv("y_test.csv", index=False)
+
+            st.session_state.split_done = True
+            st.success("Train/test files saved successfully.")

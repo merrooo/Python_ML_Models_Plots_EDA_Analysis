@@ -1,0 +1,234 @@
+<<<<<<< HEAD
+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
+
+
+
+Step 2: Install Git (IMPORTANT OPTIONS)
+
+During installation:
+
+✔ Click Next until you see
+“Adjusting your PATH environment”
+
+👉 Select THIS option (VERY IMPORTANT):
+
+✅ Git from the command line and also from 3rd-party software
+
+Then:
+
+Keep default options
+
+Finish install
+
+🔹 Step 3: RESTART EVERYTHING
+
+This is NOT optional.
+
+🔁 Restart:
+
+VS Code
+
+PowerShell / CMD
+
+(Safest) Restart your PC
+
+🔹 Step 4: Verify Git is installed
+
+Open VS Code → Terminal and run:
+
+git --version
+
+
+✅ You should see something like:
+
+git version 2.44.0.windows.1
+
+🚀 Then retry your commands
+
+git commit -am "update"
+git push
+
+
+
+
+
+
+uploads files to github
+1️⃣ Open your project folder
+
+Go to your project folder
+👉 Right-click → “Open Git Bash here”
+
+2️⃣ Initialize git
+git init
+
+3️⃣ Add ALL files
+git add .
+
+
+Check:
+
+git status
+
+
+You should see files in green.
+
+4️⃣ Commit files
+git commit -m "upload project files"
+
+5️⃣ Create repository on GitHub
+
+Open https://github.com
+
+Click New
+
+Repository name → anything
+
+❌ Do NOT add README
+
+Click Create repository
+
+6️⃣ Connect your folder to GitHub
+
+Copy the HTTPS URL from GitHub, then run:
+
+git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
+
+
+for change the your_repro_name
+
+git remote set-url origin https://github.com/merrooo/NDEDC_Smart_Meter.git
+
+
+Check:
+
+git remote -v
+
+7️⃣ Upload (PUSH) files 🚀
+git branch -M main
+git pull
+git push -u origin main
+
+If GitHub asks for password
+
+⚠️ Use Personal Access Token, NOT your password
+
+Create token:
+
+GitHub → Settings → Developer settings
+→ Personal access tokens → Tokens (classic)
+→ Generate new token
+→ ✅ repo
+→ Copy token
+
+👉 Paste token as password
+
+❌ ERROR FIXES (VERY COMMON)
+❌ failed to connect to github.com port 443
+
+Run:
+
+git config --global --unset http.proxy
+git config --global --unset https.proxy
+
+
+Then try push again.
+
+❌ remote origin already exists
+git remote remove origin
+git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
+
+✅ DONE
+
+Open your repository on GitHub
+You will see all your files uploaded 🎉
+
+👉 If it STILL doesn’t upload
+
+Copy exact error message and paste it here.
+I’ll fix it with you line by line 💪
+
+ ! [rejected]        main -> main (non-fast-forward)
+error: failed to push some refs to 'https://github.com/merrooo/Comercial_React'
+hint: Updates were rejected because the tip of your current branch is behind
+hint: its remote counterpart. If you want to integrate the remote changes,
+hint: use 'git pull' before pushing again.
+hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+
+Perfect — thanks for pasting the exact error 👍
+This is a very common Git issue and easy to fix.
+
+❌ What this error means (simple words)
+
+Your GitHub repo already has files
+(like a README or something you created on GitHub)
+
+Your local folder doesn’t have them yet, so Git refuses to push.
+
+✅ THE CORRECT FIX (SAFE WAY)
+🔹 Step 1: Pull GitHub files first
+
+Run exactly this:
+
+git pull origin main --rebase
+
+
+🔐 If asked → use GitHub token as password.
+
+🔹 Step 2: Push again
+git push -u origin main
+
+
+✅ This should work.
+
+🧠 Why --rebase?
+
+Keeps history clean
+
+Avoids merge conflicts
+
+Best for beginners
+
+❌ If you get a merge editor screen (VIM)
+
+If this screen appears:
+
+# Please enter a commit message...
+
+
+Do this:
+
+Press ESC
+
+Type:
+
+:wq
+
+
+Press Enter
+
+🚨 IF YOU JUST WANT TO OVERWRITE GITHUB (DANGER)
+
+⚠️ This will DELETE files on GitHub and replace them with yours.
+
+git push -f origin main
+
+
+Use only if you are 100% sure.
+
+✅ FINAL CHECK
+
+Open:
+
+https://github.com/merrooo/Comercial_React
+
+
+
+
+git add.
+git commit -am "Anything"
+git push
+git status
+
+You should see your files 🎉
+>>>>>>> bb2c03d (initial)

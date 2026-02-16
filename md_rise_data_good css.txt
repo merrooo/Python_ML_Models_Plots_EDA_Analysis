@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>نظام إدارة تسجيل - التلاعبات</title>
+    <link rel="stylesheet" href="MD.css">
+
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+</head>
+
+<body>
+
+    <div class="main-container">
+        <div class="side-panel">
+            <h2>⚡ تسجيل البيانات</h2>
+            <div id="editIndicator" class="edit-indicator">📍 وضع التعديل نشط</div>
+
+            <div class="input-group"><label>القطاع</label><input id="keta3"></div>
+            <div class="input-group"><label>الهندسة</label><input id="handsa"></div>
+            <div class="input-group"><label>اسم المشترك</label><input id="mname"></div>
+            <div class="input-group"><label>رقم العداد</label><input id="mno"></div>
+
+            <div class="row-flex">
+                <div class="input-group"><label>القراءة kWh</label><input id="kwh_reading" type="number"></div>
+                <div class="input-group"><label>القراءة kVARh</label><input id="kvarh_reading" type="number"></div>
+            </div>
+
+            <div class="row-flex">
+                <div class="input-group"><label>أقصى حمل</label><input id="max_load" type="number"></div>
+                <div class="input-group"><label>معامل القدرة</label><input id="power_factor" type="number" step="0.01">
+                </div>
+            </div>
+
+            <div class="row-flex">
+                <div class="input-group"><label>محول جهد</label><input id="vt_ratio" value="11000/110"></div>
+                <div class="input-group"><label>محول تيار</label><input id="ct_ratio" value="200/5"></div>
+            </div>
+
+            <div class="row-flex">
+                <div class="input-group"><label>الثابت</label><input id="constant" type="number"></div>
+                <div class="input-group"><label>المكان</label><input id="location"></div>
+            </div>
+
+            <div class="row-flex">
+                <div class="input-group"><label>تاريخ الرفع</label><input type="date" id="inspection_date"></div>
+                <div class="input-group"><label>تاريخ التركيب</label><input type="date" id="fix_date"></div>
+            </div>
+
+            <div class="row-flex">
+                <div class="input-group"><label>تاريخ الإطلاق</label><input type="date" id="power_date"></div>
+                <div class="input-group"><label>تاريخ المرور</label><input type="date" id="passing_date"></div>
+            </div>
+
+            <div class="input-group">
+                <label>نوع العداد</label>
+                <select id="mtype">
+                    <option value="">اختر النوع</option>
+                    <option>EDMI</option>
+                    <option>Global</option>
+                    <option>Smart</option>
+                    <option>Micro Stare</option>
+                </select>
+            </div>
+
+            <div class="input-group"><label>الملاحظات</label><textarea id="munip"></textarea></div>
+
+            <div class="action-btns">
+                <button class="btn-save btn-full" onclick="quickSave()">💾 حفظ البيانات</button>
+                <button class="btn-clear" onclick="clearForm()">🧹 تفريغ</button>
+                <button class="btn-excel" onclick="document.getElementById('excelFile').click()">📥 رفع Excel</button>
+            </div>
+            <input type="file" id="excelFile" accept=".xls,.xlsx" hidden />
+        </div>
+
+        <div class="table-panel">
+            <div
+                style="display: flex; justify-content: space-between; align-items: center; gap: 15px; margin-bottom: 10px;">
+                <h3>📋 سجل البيانات (إجمالي: <span id="totalRecords">0</span>)</h3>
+
+                <input type="text" id="searchInput" placeholder="🔍 بحث بالاسم، العداد أو القطاع..."
+                    style="flex: 1; max-width: 400px; padding: 8px; border-radius: 20px; border: 1px solid #ddd;">
+
+                <button
+                    style="background:#f39c12; color:white; padding: 8px 15px; border-radius: 5px; cursor: pointer; border:none;"
+                    onclick="loadDataFromFirebase()">🔄 تحديث</button>
+            </div>
+
+            <div class="table-wrapper">
+                <table id="dataTable">
+                    <thead>
+                        <tr>
+                            <th>م</th>
+                            <th>القطاع</th>
+                            <th>الهندسة</th>
+                            <th>المشترك</th>
+                            <th>رقم العداد</th>
+                            <th>kWh</th>
+                            <th>kVARh</th>
+                            <th>أقصى حمل</th>
+                            <th>معامل القدرة</th>
+                            <th>محولات جهد</th>
+                            <th>محولات تيار</th>
+                            <th>الثابت</th>
+                            <th>المكان</th>
+                            <th>تاريخ الرفع</th>
+                            <th>تاريخ التركيب</th>
+                            <th>تاريخ الأطلاق</th>
+                            <th>تاريخ المرور</th>
+                            <th>نوع العداد</th>
+                            <th>الملاحظات</th>
+                            <th>حذف</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.3.1/firebase-app.js";
+        import { getDatabase, ref, get, set, push, remove } from "https://www.gstatic.com/firebasejs/10.3.1/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyCTSWDR3IvFpzp8UARsClrpwbRtTwr12jA",
+            databaseURL: "https://ndedc-meter-calib-default-rtdb.firebaseio.com",
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        // الخريطة الأساسية للحقول
+        const fieldMap = {
+            keta3: 'keta3',
+            handsa: 'handsa',
+            mname: 'metername',
+            mno: 'meternumber',
+            kwh_reading: 'kwh_reading',
+            kvarh_reading: 'kvarh_reading',
+            max_load: 'max_load',
+            power_factor: 'power_factor',
+            vt_ratio: 'vt_ratio',
+            ct_ratio: 'ct_ratio',
+            constant: 'constant',
+            location: 'location',
+            inspection_date: 'inspection_date',
+            fix_date: 'fix_date',
+            power_date: 'power_date',
+            passing_date: 'passing_date',
+            mtype: 'metertype',
+            munip: 'metermunip'
+        };
+
+        let currentEditKey = null;
+        let allData = [];
+
+        window.quickSave = async function () {
+            const record = {};
+            let hasData = false;
+            for (let id in fieldMap) {
+                const val = document.getElementById(id).value;
+                record[fieldMap[id]] = val;
+                if (val) hasData = true;
+            }
+            if (!hasData) return Swal.fire("تنبيه", "أدخل بيانات أولاً", "warning");
+
+            try {
+                if (currentEditKey) {
+                    await set(ref(db, `MD/meterdata/${currentEditKey}`), record);
+                } else {
+                    await push(ref(db, "MD/meterdata"), record);
+                }
+                clearForm();
+                loadDataFromFirebase();
+                Swal.fire({ icon: 'success', title: 'تم الحفظ بنجاح', timer: 1000, showConfirmButton: false });
+            } catch (e) { Swal.fire("خطأ", e.message, "error"); }
+        };
+
+        window.loadDataFromFirebase = async function () {
+            const tableBody = document.getElementById("tableBody");
+            tableBody.innerHTML = "<tr><td colspan='20'>جاري تحميل السجلات...</td></tr>";
+
+            try {
+                const snapshot = await get(ref(db, "MD/meterdata"));
+                allData = [];
+                if (snapshot.exists()) {
+                    snapshot.forEach((child) => {
+                        allData.push({ key: child.key, ...child.val() });
+                    });
+                    renderTable(allData);
+                } else {
+                    tableBody.innerHTML = "<tr><td colspan='20'>لا توجد سجلات حالياً</td></tr>";
+                    document.getElementById("totalRecords").innerText = "0";
+                }
+            } catch (e) {
+                tableBody.innerHTML = `<tr><td colspan='20'>خطأ: ${e.message}</td></tr>`;
+            }
+        };
+
+        function renderTable(dataArray) {
+            const tableBody = document.getElementById("tableBody");
+            tableBody.innerHTML = "";
+            let count = 0;
+
+            dataArray.forEach((data) => {
+                count++;
+                const row = document.createElement("tr");
+                if (currentEditKey === data.key) row.className = "selected-row";
+
+                row.onclick = () => fillForm(data.key, data);
+                row.innerHTML = `
+                    <td>${count}</td>
+                    <td>${data.keta3 || ''}</td>
+                    <td>${data.handsa || ''}</td>
+                    <td>${data.metername || ''}</td>
+                    <td>${data.meternumber || ''}</td>
+                    <td>${data.kwh_reading || '0'}</td>
+                    <td>${data.kvarh_reading || '0'}</td>
+                    <td>${data.max_load || '0'}</td>
+                    <td>${data.power_factor || '0'}</td>
+                    <td>${data.vt_ratio || ''}</td>
+                    <td>${data.ct_ratio || ''}</td>
+                    <td>${data.constant || ''}</td>
+                    <td>${data.location || ''}</td>
+                    <td>${data.inspection_date || ''}</td>
+                    <td>${data.fix_date || ''}</td>
+                    <td>${data.power_date || ''}</td>
+                    <td>${data.passing_date || ''}</td>
+                    <td>${data.metertype || ''}</td>
+                    <td title="${data.metermunip || ''}">${data.metermunip ? data.metermunip.substring(0, 15) + '...' : ''}</td>
+                    <td><button onclick="event.stopPropagation(); deleteRec('${data.key}')" style="background:#e74c3c; color:white; border:none; padding:4px 8px; border-radius:4px; cursor:pointer;">حذف</button></td>
+                `;
+                tableBody.appendChild(row);
+            });
+            document.getElementById("totalRecords").innerText = count;
+        }
+
+        document.getElementById("searchInput").addEventListener("input", function (e) {
+            const term = e.target.value.toLowerCase();
+            const filtered = allData.filter(item =>
+                (item.metername && item.metername.toLowerCase().includes(term)) ||
+                (item.meternumber && item.meternumber.toString().includes(term)) ||
+                (item.keta3 && item.keta3.toLowerCase().includes(term))
+            );
+            renderTable(filtered);
+        });
+
+        window.fillForm = function (key, data) {
+            currentEditKey = key;
+            document.getElementById("editIndicator").style.display = "block";
+            for (let id in fieldMap) {
+                const dbField = fieldMap[id];
+                document.getElementById(id).value = data[dbField] || "";
+            }
+        };
+
+        window.clearForm = function () {
+            currentEditKey = null;
+            document.getElementById("editIndicator").style.display = "none";
+            document.querySelectorAll('input, select, textarea').forEach(el => {
+                if (el.id === 'vt_ratio') el.value = "11000/110";
+                else if (el.id === 'ct_ratio') el.value = "200/5";
+                else el.value = "";
+            });
+        };
+
+        window.deleteRec = async function (key) {
+            const conf = await Swal.fire({ title: 'حذف؟', icon: 'warning', showCancelButton: true });
+            if (conf.isConfirmed) {
+                await remove(ref(db, `MD/meterdata/${key}`));
+                loadDataFromFirebase();
+            }
+        };
+
+        // دالة مخصصة للبحث في ملف الإكسيل الذي أرسلته
+        function getVal(row, possibleKeys) {
+            const keys = Object.keys(row);
+            for (let pKey of possibleKeys) {
+                const found = keys.find(k => {
+                    const cleanK = k.toString().replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+                    const cleanP = pKey.toString().trim();
+                    return cleanK === cleanP || cleanK.includes(cleanP);
+                });
+                if (found) return row[found];
+            }
+            return '';
+        }
+
+        document.getElementById("excelFile").addEventListener("change", function (e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async (evt) => {
+                try {
+                    const data = new Uint8Array(evt.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+
+                    Swal.fire({ title: 'جاري رفع ملف جنوب الدقهلية...', didOpen: () => Swal.showLoading() });
+
+                    for (let row of json) {
+                        const record = {
+                            keta3: getVal(row, ['القطاع']),
+                            handsa: getVal(row, ['الهندسة', 'الهندسه']), // معالجة الهاء والتاء المربوطة
+                            metername: getVal(row, ['الاسم']),
+                            meternumber: getVal(row, ['رقم الشاسيه', 'رقم العداد']), // معالجة مسمى ملفك
+                            kwh_reading: getVal(row, ['القراءة ك.و.س', 'kwh']),
+                            kvarh_reading: getVal(row, ['القراءة ك.فار .س', 'kvarh']),
+                            max_load: getVal(row, ['اقصى حمل']),
+                            power_factor: getVal(row, ['معامل قدرة', 'معامل القدرة']),
+                            vt_ratio: getVal(row, ['محولات الجهد', 'جهد']) || '11000/110',
+                            ct_ratio: getVal(row, ['محولات التيار', 'تيار']) || '200/5',
+                            constant: getVal(row, ['الثابت']),
+                            location: getVal(row, ['مكان التركيب', 'المكان']),
+                            inspection_date: getVal(row, ['تاريخ الرفع']),
+                            fix_date: getVal(row, ['تاريخ التركيب']),
+                            power_date: getVal(row, ['تاريخ الأطلاق']),
+                            passing_date: getVal(row, ['تاريخ المرور']),
+                            metertype: getVal(row, ['نوع العداد']),
+                            metermunip: getVal(row, ['ملاحظات'])
+                        };
+                        await push(ref(db, "MD/meterdata"), record);
+                    }
+                    Swal.fire("نجاح", `تم استيراد ${json.length} سجل بنجاح`, "success");
+                    loadDataFromFirebase();
+                } catch (err) {
+                    Swal.fire("خطأ", "فشل استيراد الملف", "error");
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        loadDataFromFirebase();
+    </script>
+</body>
+
+</html>

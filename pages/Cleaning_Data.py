@@ -97,6 +97,14 @@ def apply_outlier_strategy_until_stable(
     return df_work, iterations
 
 
+def one_shot_checkbox(label: str, key: str) -> bool:
+    fired = bool(st.session_state.get(key, False))
+    if fired:
+        st.session_state[key] = False
+    st.checkbox(label, key=key)
+    return fired
+
+
 # ------------------------------------------------------------------
 # 1. Data Source (Upload or GitHub)
 # ------------------------------------------------------------------
@@ -112,7 +120,7 @@ if "df" not in st.session_state:
             "Or paste a direct/Raw GitHub file URL",
             placeholder="https://github.com/user/repo/blob/main/data.csv",
         )
-        load_from_github = st.checkbox("Load from GitHub", key="load_from_github_chk")
+        load_from_github = one_shot_checkbox("Load from GitHub", "load_from_github_chk")
 
     if uploaded_file is not None:
         loaded_df = load_dataframe_from_source(uploaded_file, "")
@@ -121,7 +129,6 @@ if "df" not in st.session_state:
         st.rerun()
 
     if load_from_github:
-        st.session_state.load_from_github_chk = False
         try:
             df = load_dataframe_from_source(None, github_url)
             if df is None:
@@ -133,8 +140,7 @@ if "df" not in st.session_state:
         except Exception as e:
             st.error(f"Failed to load from GitHub: {e}")
 else:
-    if st.sidebar.checkbox("Upload Different File", key="upload_different_file_chk"):
-        st.session_state.upload_different_file_chk = False
+    if one_shot_checkbox("Upload Different File", "upload_different_file_chk"):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
@@ -161,8 +167,7 @@ if "df" in st.session_state:
         all_columns = st.session_state.df.columns.tolist()
         cols_to_drop = st.multiselect("Select columns to drop:", options=all_columns)
 
-        if st.checkbox("Confirm Drop", key="confirm_drop_chk"):
-            st.session_state.confirm_drop_chk = False
+        if one_shot_checkbox("Confirm Drop", "confirm_drop_chk"):
             if cols_to_drop:
                 st.session_state.df.drop(columns=cols_to_drop, inplace=True)
                 st.session_state.df.to_csv("Data_Dropped_Columns.csv", index=False, encoding="utf-8-sig")
@@ -244,8 +249,7 @@ if "df" in st.session_state:
                     st.write("Sample after Label Encoding:")
                     st.dataframe(label_preview, use_container_width=True, height=230)
 
-            if st.checkbox("Apply Encoding", key="apply_encoding_chk"):
-                st.session_state.apply_encoding_chk = False
+            if one_shot_checkbox("Apply Encoding", "apply_encoding_chk"):
                 if selected_enc:
                     if method == "One-Hot Encoding":
                         st.session_state.df = pd.get_dummies(
@@ -274,8 +278,7 @@ if "df" in st.session_state:
             st.markdown("---")
             st.subheader("Encoded Data Result")
             st.caption(f"Method: {st.session_state.get('last_encoding_method', 'Unknown')}")
-            if st.checkbox("Load and Preview Encoded Data", key="load_encoded_preview_chk"):
-                st.session_state.load_encoded_preview_chk = False
+            if one_shot_checkbox("Load and Preview Encoded Data", "load_encoded_preview_chk"):
                 st.session_state.show_encoded_preview = True
 
             if st.session_state.get("show_encoded_preview", False):
@@ -315,8 +318,7 @@ if "df" in st.session_state:
 
     # --- 3. Date Conversion ---
     with st.expander("3) Convert Date Columns"):
-        if st.checkbox("Extract Date Parts", key="extract_date_parts_chk"):
-            st.session_state.extract_date_parts_chk = False
+        if one_shot_checkbox("Extract Date Parts", "extract_date_parts_chk"):
             df_temp = st.session_state.df.copy()
             converted_cols = []
             candidate_cols = df_temp.select_dtypes(include=["object", "string", "category"]).columns.tolist()
@@ -455,8 +457,7 @@ if "df" in st.session_state:
                 horizontal=True,
             )
 
-            if st.checkbox("Apply Selected Strategy", key="apply_outlier_strategy_chk"):
-                st.session_state.apply_outlier_strategy_chk = False
+            if one_shot_checkbox("Apply Selected Strategy", "apply_outlier_strategy_chk"):
                 if apply_scope == "Selected column only":
                     updated_df, used_iters = apply_outlier_strategy_until_stable(
                         st.session_state.df, target_col, strat
@@ -492,8 +493,7 @@ if "df" in st.session_state:
                     st.session_state.pop("outlier_preview_iters", None)
                     st.rerun()
 
-            if st.checkbox("Preview Strategy Result", key="preview_outlier_strategy_chk"):
-                st.session_state.preview_outlier_strategy_chk = False
+            if one_shot_checkbox("Preview Strategy Result", "preview_outlier_strategy_chk"):
                 preview_df, preview_iters = apply_outlier_strategy_until_stable(
                     st.session_state.df, target_col, strat
                 )
@@ -591,8 +591,7 @@ if "df" in st.session_state:
     with st.expander("5) Split Data"):
         target_var = st.selectbox("Target column (y):", options=st.session_state.df.columns.tolist())
         size = st.slider("Test size:", 0.1, 0.5, 0.2)
-        if st.checkbox("Run Final Split", key="run_final_split_chk"):
-            st.session_state.run_final_split_chk = False
+        if one_shot_checkbox("Run Final Split", "run_final_split_chk"):
             X = st.session_state.df.drop(columns=[target_var])
             y = st.session_state.df[target_var]
             X = pd.get_dummies(X, drop_first=True, dtype=int)

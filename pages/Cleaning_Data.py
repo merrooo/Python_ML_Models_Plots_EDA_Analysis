@@ -140,7 +140,11 @@ if "df" not in st.session_state:
         except Exception as e:
             st.error(f"Failed to load from GitHub: {e}")
 else:
-    if one_shot_checkbox("Upload Different File", "upload_different_file_chk"):
+    upload_different_file_trigger = bool(st.session_state.get("upload_different_file_chk", False))
+    if upload_different_file_trigger:
+        st.session_state.upload_different_file_chk = False
+    st.sidebar.checkbox("Upload Different File", key="upload_different_file_chk")
+    if upload_different_file_trigger:
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()

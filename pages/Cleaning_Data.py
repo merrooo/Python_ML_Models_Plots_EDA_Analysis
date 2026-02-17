@@ -15,6 +15,13 @@ from sklearn.preprocessing import (
     StandardScaler,
 )
 from sklearn.ensemble import IsolationForest
+from sklearn.utils import resample
+
+try:
+    from imblearn.over_sampling import SMOTE
+    HAS_SMOTE = True
+except Exception:
+    HAS_SMOTE = False
 
 st.set_page_config(page_title="Data Cleaning - NDEDC", layout="wide")
 st.title("Data Cleaning and Final Dataset Preparation")
@@ -213,14 +220,52 @@ if "df" in st.session_state:
     st.markdown("---")
     st.subheader("Original Data Preview")
     st.dataframe(st.session_state.df_original, height=600, use_container_width=True)
+    all_cols = st.session_state.df.columns.tolist()
+    if all_cols:
+        default_output_idx = len(all_cols) - 1
+        if st.session_state.get("model_output_col") in all_cols:
+            default_output_idx = all_cols.index(st.session_state.get("model_output_col"))
+        output_col = st.selectbox(
+            "Select Output/Target column:",
+            options=all_cols,
+            index=default_output_idx,
+            key="model_output_col",
+        )
+        default_inputs = [c for c in all_cols if c != output_col]
+        if st.session_state.get("model_input_cols"):
+            remembered = [c for c in st.session_state.get("model_input_cols", []) if c in default_inputs]
+            if remembered:
+                default_inputs = remembered
+        input_cols = st.multiselect(
+            "Select Input/Feature columns:",
+            options=[c for c in all_cols if c != output_col],
+            default=default_inputs,
+            key="model_input_cols",
+        )
+        st.caption(f"Current Output: `{output_col}`")
+        st.caption(f"Current Inputs count: `{len(input_cols)}`")
     with st.expander("Inspect Data Types"):
         st.write(st.session_state.df_original.dtypes)
 
     st.markdown("---")
     st.subheader("Processing Tools")
+    with st.expander("Process Guide (Step-by-Step)"):
+        process_guide_df = pd.DataFrame(
+            [
+                {"step": "1) Drop Columns", "what_it_does": "Removes irrelevant features.", "why_use_it": "Reduce noise and simplify modeling."},
+                {"step": "2) Encode Text Columns", "what_it_does": "Converts categorical text to numeric values.", "why_use_it": "Most ML models require numeric inputs."},
+                {"step": "2.1) Correlation Check", "what_it_does": "Ranks relationships to selected output/feature.", "why_use_it": "Find strongest predictors and redundancy."},
+                {"step": "3) Feature Transformation", "what_it_does": "Rescales/reshapes numeric features.", "why_use_it": "Improve model stability and skewness behavior."},
+                {"step": "4) Outlier Preview", "what_it_does": "Shows where extreme values exist.", "why_use_it": "Decide whether transformation is enough."},
+                {"step": "5) Class Balancing", "what_it_does": "Makes class counts equal for classification.", "why_use_it": "Reduce target-class bias in training."},
+            ]
+        )
+        st.dataframe(process_guide_df, use_container_width=True, height=280)
+        st.caption("Run steps in order: Drop -> Encode -> Correlation -> Transform -> Outlier Check -> Balance (if classification).")
 
     # --- 1. Drop Columns ---
     with st.expander("1) Drop Columns"):
+        st.caption("Use this when columns are IDs, duplicates, leakage, or irrelevant for modeling.")
         all_columns = st.session_state.df.columns.tolist()
         cols_to_drop = st.multiselect("Select columns to drop:", options=all_columns)
 
@@ -233,6 +278,7 @@ if "df" in st.session_state:
 
     # --- 2. Encoding ---
     with st.expander("2) Encode Text Columns (One-Hot / Label)"):
+        st.caption("Convert text categories to numeric form before training ML models.")
         obj_cols = st.session_state.df.select_dtypes(include=["object"]).columns.tolist()
         if obj_cols:
             st.write(f"Available object columns: `{obj_cols}`")
@@ -261,6 +307,10 @@ if "df" in st.session_state:
                 st.dataframe(value_counts_df.head(20), use_container_width=True, height=260)
 
             method = st.radio("Encoding method:", ["One-Hot Encoding", "Label Encoding"])
+            st.caption(
+                "Use One-Hot for nominal categories (no order). Use Label Encoding for ordinal categories "
+                "(example: low=0, medium=1, high=2)."
+            )
             selected_enc = st.multiselect("Select columns to encode:", options=obj_cols)
             output_file_name = st.text_input(
                 "Final processed file name (CSV):",
@@ -404,7 +454,32 @@ if "df" in st.session_state:
                         st.error(f"Failed to save file: {e}")
 
         st.markdown("---")
+        with st.expander("Read Before Transformation: Binary vs Continuous Features"):
+            st.markdown(
+                """
+**1) Why not Power-Transform binary features (0/1)?**
+- A binary feature has only two values (0 and 1), not a real continuous distribution.
+- High skewness in binary flags usually means class imbalance (many 0, few 1), not a shape problem.
+- Power/standard/min-max transforms on binary flags often just convert them to decimals and can reduce interpretability.
+
+**2) How to handle skewness in binary features**
+- Keep binary flags as `0/1` so the model reads them as Yes/No indicators.
+- Handle imbalance at the target/class level with balancing methods such as `SMOTE`, oversampling, or undersampling.
+
+**3) What to transform vs what to keep**
+- Transform continuous numeric measurements when needed (scaling or power transform).
+- Keep categorical flags in binary form after encoding (for example, one-hot encoded columns and other Yes/No indicator columns).
+
+**Summary**
+- Right-skew in binary flags is usually imbalance.
+- Use transformation for continuous features.
+- Use balancing (including SMOTE) for class imbalance.
+"""
+            )
+
+        st.markdown("---")
         with st.expander("Feature Correlation (All Numeric Features)"):
+            st.caption("Choose output/target first, then inspect strongest to weakest correlations.")
             corr_method = st.radio(
                 "Correlation method:",
                 ["pearson", "spearman", "kendall"],
@@ -436,96 +511,8 @@ if "df" in st.session_state:
             else:
                 st.info("Need at least 2 numeric columns to compute correlation.")
 
-        with st.expander("Skewness Check (After Encoding)"):
-            skew_df = st.session_state.df.select_dtypes(include=[np.number])
-            if skew_df.shape[1] == 0:
-                st.info("No numeric columns available for skewness check.")
-            else:
-                skew_mode = st.radio(
-                    "Skewness mode:",
-                    ["One feature", "All numeric features"],
-                    horizontal=True,
-                    key="skew_mode_after_encoding",
-                )
-                if skew_mode == "One feature":
-                    skew_col = st.selectbox(
-                        "Select feature:",
-                        options=skew_df.columns.tolist(),
-                        key="skew_col_after_encoding",
-                    )
-                    skew_value = float(skew_df[skew_col].skew())
-                    st.metric("Skewness Value", f"{skew_value:.6f}")
-                    st.dataframe(
-                        pd.DataFrame(
-                            {
-                                "feature": [skew_col],
-                                "skewness": [skew_value],
-                                "skew_type": [
-                                    "right-skewed" if skew_value > 0.5 else
-                                    "left-skewed" if skew_value < -0.5 else
-                                    "approximately symmetric"
-                                ],
-                            }
-                        ),
-                        use_container_width=True,
-                        height=120,
-                    )
-                else:
-                    skew_summary = pd.DataFrame(
-                        {
-                            "feature": skew_df.columns.tolist(),
-                            "skewness": [float(skew_df[c].skew()) for c in skew_df.columns],
-                        }
-                    )
-                    skew_summary["abs_skewness"] = skew_summary["skewness"].abs()
-                    skew_summary["skew_type"] = skew_summary["skewness"].apply(
-                        lambda x: "right-skewed" if x > 0.5 else
-                        "left-skewed" if x < -0.5 else
-                        "approximately symmetric"
-                    )
-                    skew_summary = skew_summary.sort_values("abs_skewness", ascending=False)
-                    st.dataframe(skew_summary, use_container_width=True, height=340)
-
-    # --- 3. Date Conversion ---
-    with st.expander("3) Convert Date Columns"):
-        if one_shot_checkbox("Extract Date Parts", "extract_date_parts_chk"):
-            df_temp = st.session_state.df.copy()
-            converted_cols = []
-            candidate_cols = df_temp.select_dtypes(include=["object", "string", "category"]).columns.tolist()
-
-            for col in candidate_cols:
-                series = df_temp[col]
-                parsed = pd.to_datetime(series, errors="coerce", format="mixed")
-                parsed_ratio = float(parsed.notna().mean()) if len(parsed) else 0.0
-                if parsed_ratio >= 0.6 and parsed.notna().sum() > 0:
-                    df_temp[f"{col}_year"] = parsed.dt.year
-                    df_temp[f"{col}_month"] = parsed.dt.month
-                    df_temp[f"{col}_day"] = parsed.dt.day
-                    df_temp.drop(columns=[col], inplace=True)
-                    converted_cols.append(col)
-
-            if converted_cols:
-                st.session_state.df = df_temp
-                st.session_state.date_applied = True
-                st.session_state.date_result_df = df_temp.copy()
-                st.session_state.date_converted_cols = converted_cols
-                st.success(f"Date conversion completed for: {', '.join(converted_cols)}")
-                st.rerun()
-            else:
-                st.warning("No date-like columns were detected in the current working data.")
-
-        if st.session_state.get("date_applied", False):
-            st.markdown("---")
-            st.subheader("Date Conversion Result")
-            st.caption(
-                "Converted columns: "
-                + ", ".join(st.session_state.get("date_converted_cols", []))
-            )
-            date_preview_df = st.session_state.get("date_result_df", st.session_state.df)
-            st.dataframe(date_preview_df.head(30), use_container_width=True, height=320)
-
-     # --- 5. Feature Transformation ---
-    with st.expander("5) Feature Transformation (Scaling)"):
+    # --- 3. Feature Transformation ---
+    with st.expander("3) Feature Transformation (Scaling)"):
         transform_num_cols = st.session_state.df.select_dtypes(include=[np.number]).columns.tolist()
         if not transform_num_cols:
             st.info("No numeric columns available for transformation.")
@@ -538,6 +525,40 @@ if "df" in st.session_state:
 - `Min-Max Scaling (0 to 1)`: keeps relative distances in a fixed range; common for neural-network style pipelines.
 - `Robust Scaling (Outlier-resistant)`: uses median/IQR; safer when outliers exist and you do not want to drop them.
 """
+            )
+            st.markdown("**Method Selection Summary (General):**")
+            hr_reco_df = pd.DataFrame(
+                [
+                    {
+                        "method": "Power Transform (Yeo-Johnson)",
+                        "when_to_use": "Feature is strongly skewed / non-normal",
+                        "primary_goal": "Fix skewness (change distribution shape)",
+                        "why_not_always": "Unnecessary for already symmetric features.",
+                    },
+                    {
+                        "method": "Standard Scaling (Z-score)",
+                        "when_to_use": "Feature is roughly symmetric but on different scale",
+                        "primary_goal": "Put features on same scale",
+                        "why_not_always": "Sensitive to outliers; does not fix skewness shape.",
+                    },
+                    {
+                        "method": "Min-Max Scaling (0 to 1)",
+                        "when_to_use": "Need bounded feature range [0, 1]",
+                        "primary_goal": "Boundary control (0 to 1)",
+                        "why_not_always": "Strongly affected by extreme outliers.",
+                    },
+                    {
+                        "method": "Robust Scaling (Outlier-resistant)",
+                        "when_to_use": "Outliers exist and you want to keep rows",
+                        "primary_goal": "Outlier protection",
+                        "why_not_always": "Does not normalize shape as strongly as power transform.",
+                    },
+                ]
+            )
+            st.dataframe(hr_reco_df, use_container_width=True, height=240)
+            st.warning(
+                "Important: do not transform binary flag columns (0/1) unless you intentionally want that. "
+                "One-hot encoded flag columns are usually already model-ready."
             )
             transform_method = st.radio(
                 "Transformation method:",
@@ -581,11 +602,51 @@ if "df" in st.session_state:
                 key="transform_feature_selection",
             )
             st.caption(f"Detected binary 0/1 features: {binary_cols}")
+
+            st.markdown("**Skewness before transformation (selected features):**")
+            if transform_cols:
+                skew_selected = pd.DataFrame(
+                    {
+                        "feature": transform_cols,
+                        "skewness": [float(st.session_state.df[c].skew()) for c in transform_cols],
+                    }
+                )
+                skew_selected["abs_skewness"] = skew_selected["skewness"].abs()
+                skew_selected["skew_type"] = skew_selected["skewness"].apply(
+                    lambda x: "right-skewed" if x > 0.5 else
+                    "left-skewed" if x < -0.5 else
+                    "approximately symmetric"
+                )
+                st.dataframe(skew_selected.sort_values("abs_skewness", ascending=False), use_container_width=True, height=240)
+            else:
+                st.info("Select at least one feature to view skewness values.")
+
             selected_transform_col = st.selectbox(
                 "Preview column:",
                 options=transform_cols if transform_cols else transform_num_cols,
                 key="transform_preview_col",
             )
+
+            def build_skew_compare_table(df_before: pd.DataFrame, df_after: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+                rows = []
+                for c in cols:
+                    skew_before = float(df_before[c].skew())
+                    skew_after = float(df_after[c].skew())
+                    abs_before = abs(skew_before)
+                    abs_after = abs(skew_after)
+                    rows.append(
+                        {
+                            "feature": c,
+                            "skew_before": skew_before,
+                            "abs_skew_before": abs_before,
+                            "skew_after": skew_after,
+                            "abs_skew_after": abs_after,
+                            "abs_skew_change": abs_after - abs_before,
+                            "improved": abs_after < abs_before,
+                        }
+                    )
+                out = pd.DataFrame(rows)
+                return out.sort_values("abs_skew_before", ascending=False).reset_index(drop=True)
 
             def run_transform(df_in: pd.DataFrame):
                 df_out = df_in.copy()
@@ -630,18 +691,24 @@ if "df" in st.session_state:
                         use_container_width=True,
                         height=240,
                     )
+                if transform_cols:
+                    st.markdown("**Skewness check (before vs after preview):**")
+                    skew_compare_preview = build_skew_compare_table(st.session_state.df, tp, transform_cols)
+                    st.dataframe(skew_compare_preview, use_container_width=True, height=260)
 
             if one_shot_checkbox("Apply Transformation", "apply_transform_chk"):
                 if not transform_cols:
                     st.info("No features selected for transformation.")
                 else:
+                    before_apply_df = st.session_state.df.copy()
                     transformed_df = run_transform(st.session_state.df)
                     st.session_state.df = transformed_df
                     st.session_state.transformation_applied = True
                     st.session_state.transformation_method = transform_method
                     st.session_state.transformation_scope = "user-selected features"
                     st.session_state.transformation_features = transform_cols
-                    st.session_state.transformation_skipped_binary = binary_cols
+                    st.session_state.transformation_detected_binary = binary_cols
+                    st.session_state.transformation_before_df = before_apply_df
                     st.session_state.transformation_result_df = transformed_df.copy()
                     st.session_state.pop("transform_preview_df", None)
                     st.session_state.pop("transform_preview_method", None)
@@ -656,10 +723,16 @@ if "df" in st.session_state:
                     f"`{st.session_state.get('transformation_scope', '')}`"
                 )
                 st.caption(f"Transformed features: {st.session_state.get('transformation_features', [])}")
-                st.caption(f"Skipped binary 0/1 features: {st.session_state.get('transformation_skipped_binary', [])}")
+                st.caption(f"Detected binary 0/1 features: {st.session_state.get('transformation_detected_binary', [])}")
                 tr = st.session_state.get("transformation_result_df", st.session_state.df)
                 st.write(f"Transformed data rows: {tr.shape[0]} | columns: {tr.shape[1]}")
                 st.dataframe(tr.head(30), use_container_width=True, height=320)
+                applied_cols = st.session_state.get("transformation_features", [])
+                if applied_cols:
+                    st.markdown("**Skewness check (before vs after apply):**")
+                    before_df = st.session_state.get("transformation_before_df", st.session_state.df_original)
+                    skew_compare_applied = build_skew_compare_table(before_df, tr, applied_cols)
+                    st.dataframe(skew_compare_applied, use_container_width=True, height=260)
                 with st.expander("Show full transformed data table"):
                     st.dataframe(tr, use_container_width=True, height=520)
 
@@ -697,8 +770,9 @@ if "df" in st.session_state:
                         st.error(f"Failed to save transformed file: {e}")
                         
 
-    # --- 4. Outliers ---
-    with st.expander("4) Outlier Handling"):
+    # --- 4. Outlier Preview ---
+    with st.expander("4) Outlier Preview"):
+        st.caption("Preview only: this section helps you inspect extreme values after transformation.")
         num_cols = st.session_state.df.select_dtypes(include=[np.number]).columns.tolist()
         if num_cols:
             outlier_stats = []
@@ -707,250 +781,243 @@ if "df" in st.session_state:
                 iqr_col = q3_col - q1_col
                 low_col, up_col = q1_col - 1.5 * iqr_col, q3_col + 1.5 * iqr_col
                 col_mask = (st.session_state.df[col] < low_col) | (st.session_state.df[col] > up_col)
-                col_outlier_count = int(col_mask.sum())
                 outlier_stats.append(
                     {
                         "column": col,
-                        "outlier_count": col_outlier_count,
-                        "has_outliers": col_outlier_count > 0,
+                        "outlier_count": int(col_mask.sum()),
+                        "marker": "OUTLIERS" if int(col_mask.sum()) > 0 else "",
                     }
                 )
 
             outlier_stats_df = pd.DataFrame(outlier_stats)
-            outlier_stats_df["marker"] = outlier_stats_df["has_outliers"].map(
-                lambda x: "OUTLIERS" if x else ""
-            )
             st.write("Outlier summary by numeric column:")
-            st.dataframe(
-                outlier_stats_df[["column", "outlier_count", "marker"]],
-                use_container_width=True,
-                height=min(320, 38 * (len(outlier_stats_df) + 1)),
+            st.dataframe(outlier_stats_df, use_container_width=True, height=min(320, 38 * (len(outlier_stats_df) + 1)))
+
+            cols_with_outliers = outlier_stats_df.loc[outlier_stats_df["outlier_count"] > 0, "column"].tolist()
+            if cols_with_outliers:
+                st.caption(f"Columns with detected outliers: {cols_with_outliers}")
+            else:
+                st.caption("No outliers detected by IQR rule in the current working data.")
+
+            only_outlier_cols = st.checkbox(
+                "Show only columns that currently have outliers",
+                value=True if cols_with_outliers else False,
+                key="only_outlier_cols_chk",
             )
-
-            col_option_map = {}
-            for _, row in outlier_stats_df.iterrows():
-                label = (
-                    f"{row['column']} [OUTLIERS: {int(row['outlier_count'])}]"
-                    if row["has_outliers"]
-                    else f"{row['column']}"
-                )
-                col_option_map[label] = row["column"]
-            outlier_cols_only = outlier_stats_df.loc[
-                outlier_stats_df["has_outliers"], "column"
-            ].tolist()
-
-            selected_label = st.selectbox("Select numeric column:", options=list(col_option_map.keys()))
-            target_col = col_option_map[selected_label]
-
-            q1, q3 = st.session_state.df[target_col].quantile([0.25, 0.75])
+            selectable_cols = cols_with_outliers if (only_outlier_cols and cols_with_outliers) else num_cols
+            selected_col = st.selectbox(
+                "Select column to view outlier rows:",
+                options=selectable_cols,
+                key="outlier_preview_col",
+            )
+            q1, q3 = st.session_state.df[selected_col].quantile([0.25, 0.75])
             iqr = q3 - q1
             low, up = q1 - 1.5 * iqr, q3 + 1.5 * iqr
-            mask = (st.session_state.df[target_col] < low) | (st.session_state.df[target_col] > up)
-            outliers = st.session_state.df[mask]
+            st.caption(
+                f"IQR limits for `{selected_col}` -> lower: {low:.5f}, upper: {up:.5f}"
+            )
+            outliers = st.session_state.df[(st.session_state.df[selected_col] < low) | (st.session_state.df[selected_col] > up)]
+            st.metric(f"Outliers in {selected_col}", int(outliers.shape[0]))
 
-            st.metric(f"Outliers in {target_col}", outliers.shape[0])
-            if not outliers.empty:
-                with st.expander("Show outlier rows"):
+            with st.expander("Show outlier rows"):
+                if outliers.empty:
+                    st.info(
+                        "No outlier rows for this selected column in the current data "
+                        "(based on IQR rule: values outside [Q1 - 1.5*IQR, Q3 + 1.5*IQR])."
+                    )
+                else:
                     st.dataframe(outliers, use_container_width=True, height=260)
+        else:
+            st.info("No numeric columns available for outlier preview.")
 
-                st.write("Critical outlier samples (most extreme values):")
-                q1_center, q3_center = st.session_state.df[target_col].quantile([0.25, 0.75])
-                iqr_center = q3_center - q1_center
-                median_center = st.session_state.df[target_col].median()
-                scale = iqr_center if iqr_center and not np.isnan(iqr_center) else 1.0
+    # --- 5. Class Balancing ---
+    with st.expander("5) Class Balancing (Complete Balance)"):
+        st.caption("Use this step for classification targets to make class counts equal.")
+        available_cols = st.session_state.df.columns.tolist()
+        target_col = st.session_state.get("model_output_col")
+        if target_col not in available_cols and available_cols:
+            target_col = available_cols[-1]
+        input_cols = [
+            c for c in st.session_state.get("model_input_cols", [])
+            if c in available_cols and c != target_col
+        ]
+        if not input_cols:
+            input_cols = [c for c in available_cols if c != target_col]
 
-                critical_samples = outliers.copy()
-                critical_samples["_outlier_score"] = (
-                    (critical_samples[target_col] - median_center).abs() / scale
-                )
-                critical_samples = critical_samples.sort_values(
-                    by="_outlier_score", ascending=False
-                )
+        st.caption(f"Auto-selected output from first selector: `{target_col}`")
+        st.caption(f"Auto-selected input features count: `{len(input_cols)}`")
 
-                st.dataframe(
-                    critical_samples[[target_col, "_outlier_score"]].head(10),
-                    use_container_width=True,
-                    height=260,
-                )
+        if not target_col:
+            st.warning("Please select an output/target column after the first table preview.")
+        else:
+            before_counts = st.session_state.df[target_col].value_counts(dropna=False).reset_index()
+            before_counts.columns = ["class", "count_before"]
+            st.write("Class distribution (before):")
+            st.dataframe(before_counts, use_container_width=True, height=240)
 
-                low_outliers = outliers.sort_values(by=target_col, ascending=True).head(5)
-                high_outliers = outliers.sort_values(by=target_col, ascending=False).head(5)
-                c_low, c_high = st.columns(2)
-                with c_low:
-                    st.write("Lowest outlier samples:")
-                    st.dataframe(low_outliers[[target_col]], use_container_width=True, height=180)
-                with c_high:
-                    st.write("Highest outlier samples:")
-                    st.dataframe(high_outliers[[target_col]], use_container_width=True, height=180)
-
-            st.divider()
-            strat = st.radio(
-                "Choose strategy:",
+            balance_method = st.radio(
+                "Balancing method:",
                 [
-                    "Mean Replace",
-                    "Drop Rows",
-                    "Quantile Transform",
-                    "IQR Capping (Winsorize)",
-                    "Percentile Clipping (1%-99%)",
-                    "MAD Clipping (Robust)",
-                    "Log Transform + IQR Capping",
-                    "Isolation Forest (Drop Anomalies)",
+                    "Oversample minority classes to complete balance",
+                    "Undersample majority classes to complete balance",
+                    "SMOTE (synthetic samples on numeric input features)",
                 ],
                 horizontal=True,
-                key="outlier_strategy_selected",
-            )
-            st.caption(f"Selected strategy: {strat}")
-
-            apply_scope = st.radio(
-                "Apply scope:",
-                ["Selected column only", "All columns with outliers"],
-                horizontal=True,
+                key="balance_method_radio",
             )
 
-            if one_shot_checkbox("Apply Selected Strategy", "apply_outlier_strategy_chk"):
-                if apply_scope == "Selected column only":
-                    updated_df, used_iters = apply_outlier_strategy_until_stable(
-                        st.session_state.df, target_col, strat
-                    )
-                    st.session_state.df = updated_df
-                    st.session_state.outlier_result_df = updated_df.copy()
-                    st.session_state.outlier_last_scope = target_col
+            def build_balanced_df(work_df: pd.DataFrame):
+                grouped = [g for _, g in work_df.groupby(target_col, dropna=False)]
+                if len(grouped) <= 1:
+                    return None, "Need at least 2 classes for balancing.", None, None
+
+                if balance_method.startswith("SMOTE"):
+                    if not HAS_SMOTE:
+                        return None, "SMOTE requires `imbalanced-learn`. Install it with: pip install imbalanced-learn", None, None
+                    smote_input_cols = [c for c in input_cols if c in work_df.columns and c != target_col]
+                    if not smote_input_cols:
+                        return None, "No valid input features selected for SMOTE.", None, None
+
+                    smote_df = work_df[smote_input_cols + [target_col]].copy()
+                    smote_df = smote_df.dropna(subset=[target_col])
+                    X_all = smote_df[smote_input_cols]
+                    y = smote_df[target_col]
+                    numeric_input_cols = X_all.select_dtypes(include=[np.number]).columns.tolist()
+                    excluded_non_numeric = [c for c in smote_input_cols if c not in numeric_input_cols]
+
+                    if not numeric_input_cols:
+                        return None, "SMOTE needs numeric input features. Encode text columns first.", None, None
+
+                    X = X_all[numeric_input_cols].copy()
+                    X = X.fillna(X.median(numeric_only=True))
+                    y_counts = y.value_counts()
+                    min_class_count = int(y_counts.min())
+                    if min_class_count < 2:
+                        return None, "SMOTE needs at least 2 samples in each class.", None, None
+
+                    k_neighbors = min(5, min_class_count - 1)
+                    smote = SMOTE(random_state=42, k_neighbors=k_neighbors)
+                    X_res, y_res = smote.fit_resample(X, y)
+                    balanced_df = pd.DataFrame(X_res, columns=numeric_input_cols)
+                    balanced_df[target_col] = y_res.values
+                    return balanced_df, None, numeric_input_cols, excluded_non_numeric
+
+                counts = [len(g) for g in grouped]
+                if balance_method.startswith("Oversample"):
+                    target_n = max(counts)
+                    balanced_parts = [
+                        resample(g, replace=True, n_samples=target_n, random_state=42)
+                        for g in grouped
+                    ]
                 else:
-                    df_work = st.session_state.df.copy()
-                    total_iters = 0
-                    rounds = 0
-                    max_rounds = 10
-                    while rounds < max_rounds:
-                        rounds += 1
-                        current_num_cols = df_work.select_dtypes(include=[np.number]).columns.tolist()
-                        current_outlier_cols = []
-                        for c in current_num_cols:
-                            cmask, _, _ = get_iqr_mask(df_work[c])
-                            if int(cmask.sum()) > 0:
-                                current_outlier_cols.append(c)
+                    target_n = min(counts)
+                    balanced_parts = [
+                        resample(g, replace=False, n_samples=target_n, random_state=42)
+                        for g in grouped
+                    ]
 
-                        if not current_outlier_cols:
-                            break
+                balanced_df = (
+                    pd.concat(balanced_parts, axis=0)
+                    .sample(frac=1.0, random_state=42)
+                    .reset_index(drop=True)
+                )
+                return balanced_df, None, [], []
 
-                        for c in current_outlier_cols:
-                            df_work, used_iters_col = apply_outlier_strategy_until_stable(
-                                df_work, c, strat
-                            )
-                            total_iters += used_iters_col
-
-                    if not outlier_cols_only:
-                        st.info("No columns with outliers were found to apply this strategy.")
+            if one_shot_checkbox("Preview Balance Result", "preview_balance_chk"):
+                work_df = st.session_state.df.copy()
+                if target_col not in work_df.columns:
+                    st.error("Selected output/target column does not exist in current data.")
+                else:
+                    preview_df, preview_err, smote_used, smote_excluded = build_balanced_df(work_df)
+                    if preview_err:
+                        st.warning(preview_err)
                     else:
-                        st.session_state.df = df_work
-                        st.session_state.outlier_result_df = df_work.copy()
-                        st.session_state.outlier_last_scope = "all columns with outliers"
-                        used_iters = total_iters
+                        st.session_state.balance_preview_df = preview_df
+                        st.session_state.balance_preview_target = target_col
+                        st.session_state.balance_preview_method = balance_method
+                        st.session_state.balance_preview_smote_used = smote_used
+                        st.session_state.balance_preview_smote_excluded = smote_excluded
 
-                if apply_scope == "Selected column only" or outlier_cols_only:
-                    st.session_state.outlier_applied = True
-                    st.session_state.outlier_last_strategy = strat
-                    st.session_state.outlier_last_iterations = used_iters
-                    st.session_state.outlier_result_file = "final_process_outlier_handled_data.csv"
-                    st.session_state.pop("outlier_preview_df", None)
-                    st.session_state.pop("outlier_preview_col", None)
-                    st.session_state.pop("outlier_preview_strategy", None)
-                    st.session_state.pop("outlier_preview_iters", None)
-                    st.rerun()
+            if "balance_preview_df" in st.session_state:
+                st.markdown("**Preview before apply:**")
+                bp = st.session_state.balance_preview_df
+                bp_target = st.session_state.get("balance_preview_target", target_col)
+                bp_counts = bp[bp_target].value_counts(dropna=False).reset_index()
+                bp_counts.columns = ["class", "count_preview"]
+                st.write("Class distribution (preview):")
+                st.dataframe(bp_counts, use_container_width=True, height=220)
+                if st.session_state.get("balance_preview_method", "").startswith("SMOTE"):
+                    st.caption(f"SMOTE numeric input features used: {st.session_state.get('balance_preview_smote_used', [])}")
+                    st.caption(f"SMOTE input features excluded (non-numeric): {st.session_state.get('balance_preview_smote_excluded', [])}")
+                st.dataframe(bp.head(30), use_container_width=True, height=260)
 
-            if one_shot_checkbox("Preview Strategy Result", "preview_outlier_strategy_chk"):
-                preview_df, preview_iters = apply_outlier_strategy_until_stable(
-                    st.session_state.df, target_col, strat
-                )
-                st.session_state.outlier_preview_df = preview_df
-                st.session_state.outlier_preview_col = target_col
-                st.session_state.outlier_preview_strategy = strat
-                st.session_state.outlier_preview_iters = preview_iters
+            if one_shot_checkbox("Apply Complete Balance", "apply_balance_chk"):
+                work_df = st.session_state.df.copy()
+                if target_col not in work_df.columns:
+                    st.error("Selected output/target column does not exist in current data.")
+                else:
+                    balanced_df, apply_err, smote_used, smote_excluded = build_balanced_df(work_df)
+                    if apply_err:
+                        st.warning(apply_err)
+                    else:
+                        st.session_state.df = balanced_df
+                        st.session_state.balance_applied = True
+                        st.session_state.balance_target = target_col
+                        st.session_state.balance_method = balance_method
+                        st.session_state.balance_result_df = balanced_df.copy()
+                        st.session_state.balance_smote_used_features = smote_used
+                        st.session_state.balance_smote_excluded_features = smote_excluded
+                        st.session_state.pop("balance_preview_df", None)
+                        st.session_state.pop("balance_preview_target", None)
+                        st.session_state.pop("balance_preview_method", None)
+                        st.session_state.pop("balance_preview_smote_used", None)
+                        st.session_state.pop("balance_preview_smote_excluded", None)
+                        st.rerun()
 
-            if "outlier_preview_df" in st.session_state:
-                prev_col = st.session_state.get("outlier_preview_col", target_col)
-                prev_strat = st.session_state.get("outlier_preview_strategy", strat)
-                st.markdown("---")
-                st.write(f"Preview after `{prev_strat}` on `{prev_col}`:")
-                st.caption(f"Iterations used: {st.session_state.get('outlier_preview_iters', 0)}")
-                c_prev1, c_prev2 = st.columns(2)
-                with c_prev1:
-                    st.caption("Before")
-                    st.dataframe(
-                        st.session_state.df[[prev_col]].head(20),
-                        use_container_width=True,
-                        height=240,
-                    )
-                with c_prev2:
-                    st.caption("After (Preview)")
-                    st.dataframe(
-                        st.session_state.outlier_preview_df[[prev_col]].head(20),
-                        use_container_width=True,
-                        height=240,
-                    )
+        if st.session_state.get("balance_applied", False):
+            st.markdown("---")
+            st.subheader("Class Balancing Result")
+            st.caption(
+                f"Applied `{st.session_state.get('balance_method', '')}` on "
+                f"`{st.session_state.get('balance_target', '')}`"
+            )
+            bdf = st.session_state.get("balance_result_df", st.session_state.df)
+            if st.session_state.get("balance_method", "").startswith("SMOTE"):
+                st.caption(f"SMOTE numeric input features used: {st.session_state.get('balance_smote_used_features', [])}")
+                st.caption(f"SMOTE input features excluded (non-numeric): {st.session_state.get('balance_smote_excluded_features', [])}")
+            after_counts = bdf[st.session_state.get("balance_target")].value_counts(dropna=False).reset_index()
+            after_counts.columns = ["class", "count_after"]
+            st.write("Class distribution (after):")
+            st.dataframe(after_counts, use_container_width=True, height=240)
+            st.dataframe(bdf.head(30), use_container_width=True, height=300)
 
-            if st.session_state.get("outlier_applied", False):
-                st.markdown("---")
-                st.subheader("Outlier Handling Result")
-                st.caption(
-                    f"Applied `{st.session_state.get('outlier_last_strategy', '')}` on "
-                    f"`{st.session_state.get('outlier_last_scope', '')}`"
-                )
-                st.caption(f"Iterations used: {st.session_state.get('outlier_last_iterations', 0)}")
-                outlier_result_df = st.session_state.get("outlier_result_df", st.session_state.df)
-                st.dataframe(outlier_result_df.head(30), use_container_width=True, height=320)
+            default_name = st.session_state.get("balance_output_file", "final_process_balanced_data.csv")
+            project_folders = list_project_folders(os.getcwd(), max_depth=4)
+            selected_folder = st.selectbox(
+                "Save inside project folder:",
+                options=project_folders,
+                index=0,
+                key="balance_project_folder",
+            )
+            custom_name = st.text_input(
+                "File name:",
+                value=default_name,
+                key="balance_project_file_name",
+            ).strip()
+            if not custom_name:
+                custom_name = default_name
+            if not custom_name.lower().endswith(".csv"):
+                custom_name = f"{custom_name}.csv"
 
-                result_num_cols = outlier_result_df.select_dtypes(include=[np.number]).columns.tolist()
-                if result_num_cols:
-                    result_stats = []
-                    for c in result_num_cols:
-                        rq1, rq3 = outlier_result_df[c].quantile([0.25, 0.75])
-                        riqr = rq3 - rq1
-                        rlow, rup = rq1 - 1.5 * riqr, rq3 + 1.5 * riqr
-                        rmask = (outlier_result_df[c] < rlow) | (outlier_result_df[c] > rup)
-                        rc = int(rmask.sum())
-                        result_stats.append(
-                            {"column": c, "outlier_count": rc, "marker": "OUTLIERS" if rc > 0 else ""}
-                        )
-                    st.write("Outlier summary by numeric column (after apply):")
-                    st.caption("This table is recalculated from the current working data after each apply.")
-                    st.dataframe(
-                        pd.DataFrame(result_stats),
-                        use_container_width=True,
-                        height=min(320, 38 * (len(result_stats) + 1)),
-                    )
-
-                default_name = st.session_state.get(
-                    "outlier_result_file", "final_process_outlier_handled_data.csv"
-                )
-                project_folders = list_project_folders(os.getcwd(), max_depth=4)
-                selected_folder = st.selectbox(
-                    "Save inside project folder:",
-                    options=project_folders,
-                    index=0,
-                    key="outlier_project_folder",
-                )
-                custom_name = st.text_input(
-                    "File name:",
-                    value=default_name,
-                    key="outlier_project_file_name",
-                ).strip()
-                if not custom_name:
-                    custom_name = default_name
-                if not custom_name.lower().endswith(".csv"):
-                    custom_name = f"{custom_name}.csv"
-                target_path = os.path.join(os.getcwd(), selected_folder, custom_name)
-                st.caption(f"Target path: {target_path}")
-                if st.button("Save inside Project", key="save_outlier_to_project_btn"):
-                    try:
-                        target_dir = os.path.dirname(target_path)
-                        if target_dir:
-                            os.makedirs(target_dir, exist_ok=True)
-                        outlier_save_df = st.session_state.get("outlier_result_df", st.session_state.df)
-                        outlier_save_df.to_csv(target_path, index=False, encoding="utf-8-sig")
-                        st.success(f"File saved to: {target_path}")
-                    except Exception as e:
-                        st.error(f"Failed to save file: {e}")
-
-   
-
-   
+            st.session_state.balance_output_file = custom_name
+            target_path = os.path.join(os.getcwd(), selected_folder, custom_name)
+            st.caption(f"Target path: {target_path}")
+            if st.button("Save inside Project", key="save_balance_to_project_btn"):
+                try:
+                    target_dir = os.path.dirname(target_path)
+                    if target_dir:
+                        os.makedirs(target_dir, exist_ok=True)
+                    bdf.to_csv(target_path, index=False, encoding="utf-8-sig")
+                    st.success(f"File saved to: {target_path}")
+                except Exception as e:
+                    st.error(f"Failed to save balanced file: {e}")

@@ -239,17 +239,24 @@ if "df" in st.session_state:
             index=default_output_idx,
             key="model_output_col",
         )
-        default_inputs = [c for c in all_cols if c != output_col]
-        if st.session_state.get("model_input_cols"):
-            remembered = [c for c in st.session_state.get("model_input_cols", []) if c in default_inputs]
-            if remembered:
-                default_inputs = remembered
-        input_cols = st.multiselect(
-            "Select Input/Feature columns:",
-            options=[c for c in all_cols if c != output_col],
-            default=default_inputs,
-            key="model_input_cols",
-        )
+        prev_output_col = st.session_state.get("model_output_col_prev")
+        output_changed = prev_output_col != output_col
+        st.session_state.model_output_col_prev = output_col
+
+        allowed_inputs = [c for c in all_cols if c != output_col]
+        remembered_inputs = st.session_state.get("model_input_cols", [])
+        checkbox_grid_cols = st.columns(3)
+        for idx, col_name in enumerate(allowed_inputs):
+            chk_key = f"model_input_chk_{col_name}"
+            if output_changed:
+                st.session_state[chk_key] = True
+            elif chk_key not in st.session_state:
+                st.session_state[chk_key] = col_name in remembered_inputs if remembered_inputs else True
+            with checkbox_grid_cols[idx % 3]:
+                st.checkbox(col_name, key=chk_key)
+
+        input_cols = [c for c in allowed_inputs if st.session_state.get(f"model_input_chk_{c}", False)]
+        st.session_state.model_input_cols = input_cols
         st.caption(f"Current Output: `{output_col}`")
         st.caption(f"Current Inputs count: `{len(input_cols)}`")
     with st.expander("Inspect Data Types"):
@@ -579,6 +586,8 @@ if "df" in st.session_state:
                 horizontal=True,
                 key="transform_method_radio",
             )
+            st.markdown("**Current encoded/working data preview (compact):**")
+            st.dataframe(st.session_state.df.head(12), use_container_width=True, height=180)
             skew_threshold = st.slider(
                 "Right-skew threshold (skew > threshold):",
                 0.3,
@@ -603,12 +612,34 @@ if "df" in st.session_state:
 
             st.write(f"Suggested right-skewed features: `{suggested_cols}`")
             st.caption("You can select any numeric feature manually, including 0/1 columns if needed.")
-            transform_cols = st.multiselect(
+            quick_select_mode = st.radio(
                 "Select features to transform:",
-                options=transform_num_cols,
-                default=suggested_cols,
-                key="transform_feature_selection",
+                ["Suggested", "All", "None", "Manual"],
+                horizontal=True,
+                key="transform_quick_select_mode",
             )
+
+            prev_mode = st.session_state.get("transform_quick_select_prev_mode")
+            if prev_mode != quick_select_mode:
+                for c in transform_num_cols:
+                    chk_key = f"transform_col_chk_{c}"
+                    if quick_select_mode == "Suggested":
+                        st.session_state[chk_key] = c in suggested_cols
+                    elif quick_select_mode == "All":
+                        st.session_state[chk_key] = True
+                    elif quick_select_mode == "None":
+                        st.session_state[chk_key] = False
+                st.session_state["transform_quick_select_prev_mode"] = quick_select_mode
+
+            st.caption("Feature checkboxes:")
+            checkbox_cols = st.columns(3)
+            for idx, col_name in enumerate(transform_num_cols):
+                with checkbox_cols[idx % 3]:
+                    st.checkbox(col_name, key=f"transform_col_chk_{col_name}")
+
+            transform_cols = [
+                c for c in transform_num_cols if st.session_state.get(f"transform_col_chk_{c}", False)
+            ]
             st.caption(f"Detected binary 0/1 features: {binary_cols}")
 
             st.markdown("**Skewness before transformation (selected features):**")
@@ -745,7 +776,7 @@ if "df" in st.session_state:
                     st.dataframe(tr, use_container_width=True, height=520)
 
                 default_name = st.session_state.get(
-                    "transformation_result_file", "final_process_transformed_data.csv"
+                    "transformation_result_file", "final_process_transformed_StandardScaler_data.csv"
                 )
                 project_folders = list_project_folders(os.getcwd(), max_depth=4)
                 selected_folder = st.selectbox(

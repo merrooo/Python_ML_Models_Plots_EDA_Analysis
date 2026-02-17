@@ -1,10 +1,20 @@
-﻿import os
+import os
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import streamlit as st
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, QuantileTransformer
+from sklearn.preprocessing import (
+    LabelEncoder,
+    MinMaxScaler,
+    PowerTransformer,
+    QuantileTransformer,
+    RobustScaler,
+    StandardScaler,
+)
+from sklearn.ensemble import IsolationForest
 
 st.set_page_config(page_title="Data Cleaning - NDEDC", layout="wide")
 st.title("Data Cleaning and Final Dataset Preparation")
@@ -86,6 +96,41 @@ def apply_outlier_strategy_until_stable(
             df_work = df_work.loc[~mask].copy()
         elif strategy == "IQR Capping (Winsorize)":
             df_work[column] = df_work[column].clip(lower=low, upper=up)
+        elif strategy == "Percentile Clipping (1%-99%)":
+            lower_p = df_work[column].quantile(0.01)
+            upper_p = df_work[column].quantile(0.99)
+            df_work[column] = df_work[column].clip(lower=lower_p, upper=upper_p)
+        elif strategy == "MAD Clipping (Robust)":
+            s = df_work[column].astype(float)
+            median = s.median()
+            mad = (s - median).abs().median()
+            if mad == 0 or pd.isna(mad):
+                df_work[column] = df_work[column].clip(lower=low, upper=up)
+            else:
+                robust_sigma = mad / 0.6745
+                k = 3.5
+                lower_mad = median - k * robust_sigma
+                upper_mad = median + k * robust_sigma
+                df_work[column] = s.clip(lower=lower_mad, upper=upper_mad)
+        elif strategy == "Log Transform + IQR Capping":
+            s = df_work[column].astype(float)
+            shift = 0.0
+            min_val = float(s.min())
+            if min_val <= -1.0:
+                shift = abs(min_val) + 1.001
+            transformed = np.log1p(s + shift)
+            df_work[column] = transformed
+        elif strategy == "Isolation Forest (Drop Anomalies)":
+            s = df_work[[column]].astype(float)
+            contamination = min(0.1, max(0.01, float(mask.mean())))
+            iso = IsolationForest(
+                n_estimators=200,
+                contamination=contamination,
+                random_state=42,
+            )
+            pred = iso.fit_predict(s)
+            keep_mask = pred == 1
+            df_work = df_work.loc[keep_mask].copy()
         else:
             qt = QuantileTransformer(
                 output_distribution="normal",
@@ -242,22 +287,40 @@ if "df" in st.session_state:
                 else:
                     st.write("Label mapping per selected column:")
                     for col in selected_enc:
-                        le_preview = LabelEncoder()
-                        series_as_str = st.session_state.df[col].astype(str)
-                        le_preview.fit(series_as_str)
-                        mapping_df = pd.DataFrame(
-                            {
-                                "value": le_preview.classes_,
-                                "encoded": range(len(le_preview.classes_)),
-                            }
-                        )
+                        series_as_str = st.session_state.df[col].astype(str).str.strip().str.lower()
+                        if col.lower() == "salary":
+                            salary_map = {"low": 0, "medium": 1, "high": 2}
+                            mapping_df = pd.DataFrame(
+                                {"value": ["low", "medium", "high"], "encoded": [0, 1, 2]}
+                            )
+                        else:
+                            le_preview = LabelEncoder()
+                            le_preview.fit(series_as_str)
+                            mapping_df = pd.DataFrame(
+                                {
+                                    "value": le_preview.classes_,
+                                    "encoded": range(len(le_preview.classes_)),
+                                }
+                            )
                         st.write(f"`{col}` mapping")
                         st.dataframe(mapping_df, use_container_width=True, height=220)
 
                     label_preview = st.session_state.df[selected_enc].head(10).copy()
                     for col in selected_enc:
-                        le_preview = LabelEncoder()
-                        label_preview[col] = le_preview.fit_transform(label_preview[col].astype(str))
+                        if col.lower() == "salary":
+                            salary_map = {"low": 0, "medium": 1, "high": 2}
+                            label_preview[col] = (
+                                label_preview[col]
+                                .astype(str)
+                                .str.strip()
+                                .str.lower()
+                                .map(salary_map)
+                            )
+                        else:
+                            le_preview = LabelEncoder()
+                            label_preview[col] = le_preview.fit_transform(
+                                label_preview[col].astype(str).str.strip().str.lower()
+                            )
                     st.write("Sample after Label Encoding:")
                     st.dataframe(label_preview, use_container_width=True, height=230)
 
@@ -273,7 +336,19 @@ if "df" in st.session_state:
                     else:
                         le = LabelEncoder()
                         for col in selected_enc:
-                            st.session_state.df[col] = le.fit_transform(st.session_state.df[col].astype(str))
+                            if col.lower() == "salary":
+                                salary_map = {"low": 0, "medium": 1, "high": 2}
+                                st.session_state.df[col] = (
+                                    st.session_state.df[col]
+                                    .astype(str)
+                                    .str.strip()
+                                    .str.lower()
+                                    .map(salary_map)
+                                )
+                            else:
+                                st.session_state.df[col] = le.fit_transform(
+                                    st.session_state.df[col].astype(str).str.strip().str.lower()
+                                )
 
                     st.session_state.df.to_csv("Data_Encoded.csv", index=False, encoding="utf-8-sig")
                     st.session_state.encoding_applied = True
@@ -328,6 +403,89 @@ if "df" in st.session_state:
                     except Exception as e:
                         st.error(f"Failed to save file: {e}")
 
+        st.markdown("---")
+        with st.expander("Feature Correlation (All Numeric Features)"):
+            corr_method = st.radio(
+                "Correlation method:",
+                ["pearson", "spearman", "kendall"],
+                horizontal=True,
+                key="corr_method_radio",
+            )
+            corr_df = st.session_state.df.select_dtypes(include=[np.number])
+            if corr_df.shape[1] >= 2:
+                corr_matrix = corr_df.corr(method=corr_method)
+                st.write("Correlation matrix:")
+                st.dataframe(corr_matrix, use_container_width=True, height=320)
+
+                target_feature = st.selectbox(
+                    "Choose output/feature for correlation ranking:",
+                    options=corr_df.columns.tolist(),
+                    key="corr_target_feature",
+                )
+                target_corr = corr_matrix[target_feature].drop(labels=[target_feature]).reset_index()
+                target_corr.columns = ["feature", "correlation"]
+                target_corr["abs_correlation"] = target_corr["correlation"].abs()
+                target_corr = target_corr.sort_values("abs_correlation", ascending=False)
+
+                st.write(f"Correlations vs `{target_feature}` (strongest to weakest):")
+                st.dataframe(
+                    target_corr[["feature", "correlation", "abs_correlation"]],
+                    use_container_width=True,
+                    height=320,
+                )
+            else:
+                st.info("Need at least 2 numeric columns to compute correlation.")
+
+        with st.expander("Skewness Check (After Encoding)"):
+            skew_df = st.session_state.df.select_dtypes(include=[np.number])
+            if skew_df.shape[1] == 0:
+                st.info("No numeric columns available for skewness check.")
+            else:
+                skew_mode = st.radio(
+                    "Skewness mode:",
+                    ["One feature", "All numeric features"],
+                    horizontal=True,
+                    key="skew_mode_after_encoding",
+                )
+                if skew_mode == "One feature":
+                    skew_col = st.selectbox(
+                        "Select feature:",
+                        options=skew_df.columns.tolist(),
+                        key="skew_col_after_encoding",
+                    )
+                    skew_value = float(skew_df[skew_col].skew())
+                    st.metric("Skewness Value", f"{skew_value:.6f}")
+                    st.dataframe(
+                        pd.DataFrame(
+                            {
+                                "feature": [skew_col],
+                                "skewness": [skew_value],
+                                "skew_type": [
+                                    "right-skewed" if skew_value > 0.5 else
+                                    "left-skewed" if skew_value < -0.5 else
+                                    "approximately symmetric"
+                                ],
+                            }
+                        ),
+                        use_container_width=True,
+                        height=120,
+                    )
+                else:
+                    skew_summary = pd.DataFrame(
+                        {
+                            "feature": skew_df.columns.tolist(),
+                            "skewness": [float(skew_df[c].skew()) for c in skew_df.columns],
+                        }
+                    )
+                    skew_summary["abs_skewness"] = skew_summary["skewness"].abs()
+                    skew_summary["skew_type"] = skew_summary["skewness"].apply(
+                        lambda x: "right-skewed" if x > 0.5 else
+                        "left-skewed" if x < -0.5 else
+                        "approximately symmetric"
+                    )
+                    skew_summary = skew_summary.sort_values("abs_skewness", ascending=False)
+                    st.dataframe(skew_summary, use_container_width=True, height=340)
+
     # --- 3. Date Conversion ---
     with st.expander("3) Convert Date Columns"):
         if one_shot_checkbox("Extract Date Parts", "extract_date_parts_chk"):
@@ -365,6 +523,179 @@ if "df" in st.session_state:
             )
             date_preview_df = st.session_state.get("date_result_df", st.session_state.df)
             st.dataframe(date_preview_df.head(30), use_container_width=True, height=320)
+
+     # --- 5. Feature Transformation ---
+    with st.expander("5) Feature Transformation (Scaling)"):
+        transform_num_cols = st.session_state.df.select_dtypes(include=[np.number]).columns.tolist()
+        if not transform_num_cols:
+            st.info("No numeric columns available for transformation.")
+        else:
+            st.markdown(
+                """
+**Method Guidance (General):**
+- `Power Transform (Yeo-Johnson)`: best when features are strongly non-normal/skewed; reshapes distribution toward normality.
+- `Standard Scaling (Z-score)`: best for already fairly symmetric features; useful for linear models and SVM-like models.
+- `Min-Max Scaling (0 to 1)`: keeps relative distances in a fixed range; common for neural-network style pipelines.
+- `Robust Scaling (Outlier-resistant)`: uses median/IQR; safer when outliers exist and you do not want to drop them.
+"""
+            )
+            transform_method = st.radio(
+                "Transformation method:",
+                [
+                    "Min-Max Scaling (0 to 1)",
+                    "Standard Scaling (Z-score)",
+                    "Robust Scaling (Outlier-resistant)",
+                    "Power Transform (Yeo-Johnson)",
+                ],
+                horizontal=True,
+                key="transform_method_radio",
+            )
+            skew_threshold = st.slider(
+                "Right-skew threshold (skew > threshold):",
+                0.3,
+                2.5,
+                0.5,
+                0.1,
+                key="transform_skew_threshold",
+            )
+            skew_values = st.session_state.df[transform_num_cols].skew()
+            suggested_cols = [
+                c for c in transform_num_cols if float(skew_values.get(c, 0.0)) > float(skew_threshold)
+            ]
+            binary_cols = []
+            for c in transform_num_cols:
+                vals = pd.Series(st.session_state.df[c].dropna().unique())
+                try:
+                    vals = vals.astype(float)
+                    if len(vals) > 0 and set(np.round(vals, 10)).issubset({0.0, 1.0}):
+                        binary_cols.append(c)
+                except Exception:
+                    continue
+
+            st.write(f"Suggested right-skewed features: `{suggested_cols}`")
+            st.caption("You can select any numeric feature manually, including 0/1 columns if needed.")
+            transform_cols = st.multiselect(
+                "Select features to transform:",
+                options=transform_num_cols,
+                default=suggested_cols,
+                key="transform_feature_selection",
+            )
+            st.caption(f"Detected binary 0/1 features: {binary_cols}")
+            selected_transform_col = st.selectbox(
+                "Preview column:",
+                options=transform_cols if transform_cols else transform_num_cols,
+                key="transform_preview_col",
+            )
+
+            def run_transform(df_in: pd.DataFrame):
+                df_out = df_in.copy()
+                if not transform_cols:
+                    return df_out
+                if transform_method == "Min-Max Scaling (0 to 1)":
+                    scaler = MinMaxScaler()
+                elif transform_method == "Standard Scaling (Z-score)":
+                    scaler = StandardScaler()
+                elif transform_method == "Robust Scaling (Outlier-resistant)":
+                    scaler = RobustScaler()
+                else:
+                    scaler = PowerTransformer(method="yeo-johnson", standardize=True)
+                df_out[transform_cols] = scaler.fit_transform(df_out[transform_cols])
+                return df_out
+
+            if one_shot_checkbox("Preview Transformation", "preview_transform_chk"):
+                st.session_state.transform_preview_df = run_transform(st.session_state.df)
+                st.session_state.transform_preview_method = transform_method
+                st.session_state.transform_preview_scope = "user-selected features"
+                st.session_state.transform_selected_features = transform_cols
+
+            if "transform_preview_df" in st.session_state:
+                st.markdown("---")
+                st.write(
+                    f"Preview after `{st.session_state.get('transform_preview_method', '')}` "
+                    f"on `{st.session_state.get('transform_preview_scope', '')}`"
+                )
+                tp = st.session_state.transform_preview_df
+                tpc1, tpc2 = st.columns(2)
+                with tpc1:
+                    st.caption("Before")
+                    st.dataframe(
+                        st.session_state.df[[selected_transform_col]].head(20),
+                        use_container_width=True,
+                        height=240,
+                    )
+                with tpc2:
+                    st.caption("After (Preview)")
+                    st.dataframe(
+                        tp[[selected_transform_col]].head(20),
+                        use_container_width=True,
+                        height=240,
+                    )
+
+            if one_shot_checkbox("Apply Transformation", "apply_transform_chk"):
+                if not transform_cols:
+                    st.info("No features selected for transformation.")
+                else:
+                    transformed_df = run_transform(st.session_state.df)
+                    st.session_state.df = transformed_df
+                    st.session_state.transformation_applied = True
+                    st.session_state.transformation_method = transform_method
+                    st.session_state.transformation_scope = "user-selected features"
+                    st.session_state.transformation_features = transform_cols
+                    st.session_state.transformation_skipped_binary = binary_cols
+                    st.session_state.transformation_result_df = transformed_df.copy()
+                    st.session_state.pop("transform_preview_df", None)
+                    st.session_state.pop("transform_preview_method", None)
+                    st.session_state.pop("transform_preview_scope", None)
+                    st.rerun()
+
+            if st.session_state.get("transformation_applied", False):
+                st.markdown("---")
+                st.subheader("Transformation Result")
+                st.caption(
+                    f"Applied `{st.session_state.get('transformation_method', '')}` on "
+                    f"`{st.session_state.get('transformation_scope', '')}`"
+                )
+                st.caption(f"Transformed features: {st.session_state.get('transformation_features', [])}")
+                st.caption(f"Skipped binary 0/1 features: {st.session_state.get('transformation_skipped_binary', [])}")
+                tr = st.session_state.get("transformation_result_df", st.session_state.df)
+                st.write(f"Transformed data rows: {tr.shape[0]} | columns: {tr.shape[1]}")
+                st.dataframe(tr.head(30), use_container_width=True, height=320)
+                with st.expander("Show full transformed data table"):
+                    st.dataframe(tr, use_container_width=True, height=520)
+
+                default_name = st.session_state.get(
+                    "transformation_result_file", "final_process_transformed_data.csv"
+                )
+                project_folders = list_project_folders(os.getcwd(), max_depth=4)
+                selected_folder = st.selectbox(
+                    "Save inside project folder:",
+                    options=project_folders,
+                    index=0,
+                    key="transform_project_folder",
+                )
+                custom_name = st.text_input(
+                    "File name:",
+                    value=default_name,
+                    key="transform_project_file_name",
+                ).strip()
+                if not custom_name:
+                    custom_name = default_name
+                if not custom_name.lower().endswith(".csv"):
+                    custom_name = f"{custom_name}.csv"
+
+                target_path = os.path.join(os.getcwd(), selected_folder, custom_name)
+                st.caption(f"Target path: {target_path}")
+                if st.button("Save inside Project", key="save_transform_to_project_btn"):
+                    try:
+                        target_dir = os.path.dirname(target_path)
+                        if target_dir:
+                            os.makedirs(target_dir, exist_ok=True)
+                        transform_save_df = st.session_state.get("transformation_result_df", st.session_state.df)
+                        transform_save_df.to_csv(target_path, index=False, encoding="utf-8-sig")
+                        st.success(f"File saved to: {target_path}")
+                    except Exception as e:
+                        st.error(f"Failed to save transformed file: {e}")
+                        
 
     # --- 4. Outliers ---
     with st.expander("4) Outlier Handling"):
@@ -419,6 +750,9 @@ if "df" in st.session_state:
 
             st.metric(f"Outliers in {target_col}", outliers.shape[0])
             if not outliers.empty:
+                with st.expander("Show outlier rows"):
+                    st.dataframe(outliers, use_container_width=True, height=260)
+
                 st.write("Critical outlier samples (most extreme values):")
                 q1_center, q3_center = st.session_state.df[target_col].quantile([0.25, 0.75])
                 iqr_center = q3_center - q1_center
@@ -457,6 +791,10 @@ if "df" in st.session_state:
                     "Drop Rows",
                     "Quantile Transform",
                     "IQR Capping (Winsorize)",
+                    "Percentile Clipping (1%-99%)",
+                    "MAD Clipping (Robust)",
+                    "Log Transform + IQR Capping",
+                    "Isolation Forest (Drop Anomalies)",
                 ],
                 horizontal=True,
                 key="outlier_strategy_selected",
@@ -613,147 +951,6 @@ if "df" in st.session_state:
                     except Exception as e:
                         st.error(f"Failed to save file: {e}")
 
-    # --- 5. Train/Test Split ---
-    with st.expander("5) Split Data"):
-        target_var = st.selectbox(
-            "Choose output/target column (y):",
-            options=st.session_state.df.columns.tolist(),
-        )
-        test_size = st.slider("Test size (final):", 0.05, 0.4, 0.2, 0.05)
-        max_val_size = max(0.05, round(0.8 - test_size, 2))
-        default_val_size = min(0.1, max_val_size)
-        val_size = st.slider(
-            "Validation size (final):",
-            0.05,
-            max_val_size,
-            default_val_size,
-            0.05,
-        )
-        train_size = 1.0 - test_size - val_size
-        st.caption(
-            f"Split plan: Train={train_size:.0%}, Validation={val_size:.0%}, Test={test_size:.0%}"
-        )
+   
 
-        if one_shot_checkbox("Run Final Split", "run_final_split_chk"):
-            holdout_size = test_size + val_size
-            if holdout_size >= 1.0:
-                st.error("Invalid split sizes. Train size must be greater than 0.")
-                st.stop()
-
-            X = st.session_state.df.drop(columns=[target_var])
-            y = st.session_state.df[target_var]
-            X = pd.get_dummies(X, drop_first=True, dtype=int)
-            X_train, X_temp, y_train, y_temp = train_test_split(
-                X, y, test_size=holdout_size, random_state=42
-            )
-            test_ratio_in_temp = test_size / holdout_size
-            X_val, X_test, y_val, y_test = train_test_split(
-                X_temp, y_temp, test_size=test_ratio_in_temp, random_state=42
-            )
-
-            st.session_state.split_done = True
-            st.session_state.split_summary = {
-                "rows_total": int(len(X)),
-                "rows_train": int(len(X_train)),
-                "rows_val": int(len(X_val)),
-                "rows_test": int(len(X_test)),
-                "target": target_var,
-                "train_size": train_size,
-                "val_size": val_size,
-                "test_size": test_size,
-            }
-            st.session_state.split_preview = {
-                "X_train": X_train.head(10),
-                "X_val": X_val.head(10),
-                "X_test": X_test.head(10),
-                "y_train": y_train.head(10).to_frame(name=target_var),
-                "y_val": y_val.head(10).to_frame(name=target_var),
-                "y_test": y_test.head(10).to_frame(name=target_var),
-            }
-            st.session_state.split_data = {
-                "X_train": X_train,
-                "X_val": X_val,
-                "X_test": X_test,
-                "y_train": y_train.to_frame(name=target_var),
-                "y_val": y_val.to_frame(name=target_var),
-                "y_test": y_test.to_frame(name=target_var),
-            }
-            st.success(
-                "Split completed in memory. Review samples below, then choose folder/path and click "
-                "'Save inside Project' to write files."
-            )
-
-        if st.session_state.get("split_done", False):
-            summary = st.session_state.get("split_summary", {})
-            st.markdown("---")
-            st.subheader("Split Result Summary")
-            st.write(
-                f"Target: `{summary.get('target', 'N/A')}` | "
-                f"Train={summary.get('train_size', 0):.0%}, "
-                f"Validation={summary.get('val_size', 0):.0%}, "
-                f"Test={summary.get('test_size', 0):.0%}"
-            )
-            st.write(
-                f"Rows -> Total={summary.get('rows_total', 0)}, "
-                f"Train={summary.get('rows_train', 0)}, "
-                f"Validation={summary.get('rows_val', 0)}, "
-                f"Test={summary.get('rows_test', 0)}"
-            )
-
-            preview = st.session_state.get("split_preview", {})
-            t1, t2, t3 = st.tabs(["Train Sample", "Validation Sample", "Test Sample"])
-            with t1:
-                st.write("X_train (sample)")
-                st.dataframe(preview.get("X_train", pd.DataFrame()), use_container_width=True, height=240)
-                st.write("y_train (sample)")
-                st.dataframe(preview.get("y_train", pd.DataFrame()), use_container_width=True, height=180)
-            with t2:
-                st.write("X_val (sample)")
-                st.dataframe(preview.get("X_val", pd.DataFrame()), use_container_width=True, height=240)
-                st.write("y_val (sample)")
-                st.dataframe(preview.get("y_val", pd.DataFrame()), use_container_width=True, height=180)
-            with t3:
-                st.write("X_test (sample)")
-                st.dataframe(preview.get("X_test", pd.DataFrame()), use_container_width=True, height=240)
-                st.write("y_test (sample)")
-                st.dataframe(preview.get("y_test", pd.DataFrame()), use_container_width=True, height=180)
-
-            st.markdown("---")
-            st.subheader("Save Split Files Inside Project")
-            project_folders = list_project_folders(os.getcwd(), max_depth=4)
-            selected_folder = st.selectbox(
-                "Save inside project folder:",
-                options=project_folders,
-                index=0,
-                key="split_project_folder",
-            )
-            file_prefix = st.text_input(
-                "File name prefix:",
-                value="final_process_split",
-                key="split_file_prefix",
-            ).strip()
-            if not file_prefix:
-                file_prefix = "final_process_split"
-
-            split_file_map = {
-                "X_train": f"{file_prefix}_X_train.csv",
-                "X_val": f"{file_prefix}_X_val.csv",
-                "X_test": f"{file_prefix}_X_test.csv",
-                "y_train": f"{file_prefix}_y_train.csv",
-                "y_val": f"{file_prefix}_y_val.csv",
-                "y_test": f"{file_prefix}_y_test.csv",
-            }
-            for key_name, file_name in split_file_map.items():
-                st.caption(f"{key_name} -> {os.path.join(os.getcwd(), selected_folder, file_name)}")
-
-            if st.button("Save inside Project", key="save_split_to_project_btn"):
-                try:
-                    target_dir = os.path.join(os.getcwd(), selected_folder)
-                    os.makedirs(target_dir, exist_ok=True)
-                    split_data = st.session_state.get("split_data", {})
-                    for key_name, df_part in split_data.items():
-                        out_path = os.path.join(target_dir, split_file_map[key_name])
-                        df_part.to_csv(out_path, index=False, encoding="utf-8-sig")
-                    st.success(f"Split files saved to: {target_dir}")
-                except Exception as e:
-                    st.error(f"Failed to save split files: {e}")
+   

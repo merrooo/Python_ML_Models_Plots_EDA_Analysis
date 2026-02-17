@@ -7,6 +7,8 @@ Pass for github in git
 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
 ______________________________________
 
+Codex – OpenAI’s coding agent
+
 Turbo Console Log
 Auto Rename Tag
 CodeMetrics
@@ -20,6 +22,7 @@ Jupyter
 Jupyter Cell Tags
 Jupyter Keymap
 Jupyter SLide Show
+Live Server
 Live Server (Five server)
 Material Icon Theme
 Microsoft Edge Tools for VS Code

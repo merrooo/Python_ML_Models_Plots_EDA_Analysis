@@ -17,6 +17,14 @@ from sklearn.preprocessing import (
 from sklearn.ensemble import IsolationForest
 from sklearn.utils import resample
 
+
+
+
+
+
+
+
+
 try:
     from imblearn.over_sampling import SMOTE
     HAS_SMOTE = True
@@ -1017,7 +1025,8 @@ if "df" in st.session_state:
                     target_dir = os.path.dirname(target_path)
                     if target_dir:
                         os.makedirs(target_dir, exist_ok=True)
-                    bdf.to_csv(target_path, index=False, encoding="utf-8-sig")
+                    balance_save_df = st.session_state.get("balance_result_df", st.session_state.df)
+                    balance_save_df.to_csv(target_path, index=False, encoding="utf-8-sig")
                     st.success(f"File saved to: {target_path}")
                 except Exception as e:
                     st.error(f"Failed to save balanced file: {e}")

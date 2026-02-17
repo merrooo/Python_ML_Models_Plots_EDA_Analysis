@@ -1061,3 +1061,82 @@ if "df" in st.session_state:
                     st.success(f"File saved to: {target_path}")
                 except Exception as e:
                     st.error(f"Failed to save balanced file: {e}")
+
+            st.markdown("---")
+            st.subheader("Next Step Hint")
+            st.caption(
+                "Data is now ready for splitting and training. Since balancing is already applied, "
+                "you can use a standard Train-Test split."
+            )
+            hint_df = pd.DataFrame(
+                [
+                    {
+                        "model": "Logistic Regression",
+                        "category": "Linear",
+                        "when_to_choose": "When interpretability and simplicity are priority.",
+                        "why": "Fast, easy to explain, and strong baseline for classification.",
+                    },
+                    {
+                        "model": "Decision Tree",
+                        "category": "Tree-based",
+                        "when_to_choose": "When you want rule-like decisions and easy visualization.",
+                        "why": "Simple to interpret but can overfit without tuning.",
+                    },
+                    {
+                        "model": "Random Forest",
+                        "category": "Ensemble Trees",
+                        "when_to_choose": "Strong baseline for mixed numeric + binary tabular data.",
+                        "why": "Handles non-linear interactions well.",
+                    },
+                    {
+                        "model": "Extra Trees",
+                        "category": "Ensemble Trees",
+                        "when_to_choose": "When you want a fast robust tree ensemble baseline.",
+                        "why": "Often similar to Random Forest with different randomization.",
+                    },
+                    {
+                        "model": "Gradient Boosting",
+                        "category": "Boosting",
+                        "when_to_choose": "When you want stronger performance than single trees.",
+                        "why": "Builds trees sequentially to reduce residual errors.",
+                    },
+                    {
+                        "model": "XGBoost",
+                        "category": "Boosting",
+                        "when_to_choose": "When you want top predictive accuracy on tabular data.",
+                        "why": "Often achieves the best performance after tuning.",
+                    },
+                    {
+                        "model": "LightGBM / CatBoost",
+                        "category": "Boosting",
+                        "when_to_choose": "When handling large tabular datasets or many categorical patterns.",
+                        "why": "Efficient gradient-boosting alternatives with strong performance.",
+                    },
+                    {
+                        "model": "SVM (Linear/RBF)",
+                        "category": "Kernel-based",
+                        "when_to_choose": "When feature space boundaries are complex and data size is moderate.",
+                        "why": "Can model non-linear separation with kernels.",
+                    },
+                    {
+                        "model": "KNN",
+                        "category": "Distance-based",
+                        "when_to_choose": "When local neighborhood structure is important.",
+                        "why": "Simple non-parametric baseline; sensitive to scaling/noise.",
+                    },
+                    {
+                        "model": "Naive Bayes",
+                        "category": "Probabilistic",
+                        "when_to_choose": "When you need a very fast baseline on high-dimensional data.",
+                        "why": "Simple assumptions, fast training and inference.",
+                    },
+                    {
+                        "model": "MLP (Neural Network)",
+                        "category": "Neural",
+                        "when_to_choose": "When you want to test deep non-linear patterns.",
+                        "why": "Can capture complex structure but needs careful tuning.",
+                    },
+                ]
+            )
+            st.dataframe(hint_df, use_container_width=True, height=320)
+            st.info("Go to the Model Training page to split the data and train models.")

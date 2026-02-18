@@ -954,6 +954,60 @@ if "df" in st.session_state:
 """
             )
 
+        st.markdown("---")
+        with st.expander("Optional: Load Dataset Before Transformation / Balance"):
+            st.caption(
+                "Use this if you want to skip earlier cleaning steps and start directly from "
+                "Transformation or Balance."
+            )
+            upload_col_stage, github_col_stage = st.columns(2)
+
+            with upload_col_stage:
+                stage_uploaded_file = st.file_uploader(
+                    "Load CSV/Excel from PC",
+                    type=["csv", "xlsx", "xls"],
+                    key="pre_transform_file_uploader",
+                )
+
+            with github_col_stage:
+                stage_github_url = st.text_input(
+                    "Or paste direct/Raw GitHub file URL",
+                    placeholder="https://github.com/user/repo/blob/main/data.csv",
+                    key="pre_transform_github_url",
+                )
+
+            st.caption("If both are provided, uploaded file is used first.")
+            if st.button("Load File for Transformation/Balance", key="pre_transform_load_btn"):
+                try:
+                    loaded_stage_df = load_dataframe_from_source(stage_uploaded_file, stage_github_url)
+                    if loaded_stage_df is None:
+                        st.error("Please upload a file or provide a valid GitHub URL.")
+                    else:
+                        st.session_state.df = loaded_stage_df.copy()
+                        st.session_state.df_original = loaded_stage_df.copy()
+                        st.session_state.pop("model_output_col", None)
+                        st.session_state.pop("model_output_col_prev", None)
+                        st.session_state.pop("model_input_cols", None)
+                        for k in list(st.session_state.keys()):
+                            if str(k).startswith("model_input_chk_"):
+                                st.session_state.pop(k, None)
+                        for k in [
+                            "encoding_applied",
+                            "last_encoding_method",
+                            "encoding_result_df",
+                            "show_encoded_preview",
+                            "transformation_applied",
+                            "transformation_result_df",
+                            "balance_applied",
+                            "balance_result_df",
+                            "balance_preview_df",
+                        ]:
+                            st.session_state.pop(k, None)
+                        st.success("New dataset loaded. You can now run Transformation and/or Balance directly.")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to load dataset: {e}")
+
     # --- 3. Feature Transformation ---
     with st.expander("3) Feature Transformation (Scaling)"):
         transform_num_cols = st.session_state.df.select_dtypes(include=[np.number]).columns.tolist()
@@ -1328,7 +1382,7 @@ if "df" in st.session_state:
                 [
                     "Oversample minority classes to complete balance",
                     "Undersample majority classes to complete balance",
-                    "SMOTE (synthetic samples on numeric input features)",
+                    "SMOTE (synthetic samples on numeric input features-(but it's a good for Calssification not for Regression))",
                 ],
                 horizontal=True,
                 key="balance_method_radio",
@@ -1441,6 +1495,50 @@ if "df" in st.session_state:
                         st.session_state.pop("balance_preview_smote_used", None)
                         st.session_state.pop("balance_preview_smote_excluded", None)
                         st.rerun()
+
+        st.markdown("---")
+        with st.expander("Optional: Load Dataset Before Class Balancing Result"):
+            st.caption(
+                "Use this if you already have a transformed/balanced dataset and want to continue from here."
+            )
+            bal_up_col, bal_git_col = st.columns(2)
+            with bal_up_col:
+                balance_uploaded_file = st.file_uploader(
+                    "Load CSV/Excel from PC",
+                    type=["csv", "xlsx", "xls"],
+                    key="pre_balance_file_uploader",
+                )
+            with bal_git_col:
+                balance_github_url = st.text_input(
+                    "Or paste direct/Raw GitHub file URL",
+                    placeholder="https://github.com/user/repo/blob/main/data.csv",
+                    key="pre_balance_github_url",
+                )
+            if st.button("Load File Before Balance Result", key="pre_balance_load_btn"):
+                try:
+                    loaded_balance_df = load_dataframe_from_source(balance_uploaded_file, balance_github_url)
+                    if loaded_balance_df is None:
+                        st.error("Please upload a file or provide a valid GitHub URL.")
+                    else:
+                        st.session_state.df = loaded_balance_df.copy()
+                        st.session_state.df_original = loaded_balance_df.copy()
+                        loaded_cols = loaded_balance_df.columns.tolist()
+                        loaded_target = None
+                        preferred_target = st.session_state.get("model_output_col")
+                        if preferred_target in loaded_cols:
+                            loaded_target = preferred_target
+                        elif loaded_cols:
+                            loaded_target = loaded_cols[-1]
+                        st.session_state.balance_applied = True
+                        st.session_state.balance_result_df = loaded_balance_df.copy()
+                        st.session_state.balance_target = loaded_target
+                        st.session_state.balance_method = "Loaded from file (skip balance step)"
+                        st.session_state.balance_smote_used_features = []
+                        st.session_state.balance_smote_excluded_features = []
+                        st.success("Dataset loaded. Class Balancing Result is now based on the loaded file.")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to load dataset: {e}")
 
         if st.session_state.get("balance_applied", False):
             st.markdown("---")
@@ -2435,8 +2533,10 @@ if "mt_df" in st.session_state and isinstance(st.session_state.mt_df, pd.DataFra
                                 pipeline.fit(X_train, y_train)
                                 train_preds = pipeline.predict(X_train)
                                 test_preds = pipeline.predict(X_test)
-                                train_rmse = mean_squared_error(y_train, train_preds, squared=False)
-                                test_rmse = mean_squared_error(y_test, test_preds, squared=False)
+                                train_mse = mean_squared_error(y_train, train_preds)
+                                test_mse = mean_squared_error(y_test, test_preds)
+                                train_rmse = np.sqrt(train_mse)
+                                test_rmse = np.sqrt(test_mse)
                                 train_r2 = r2_score(y_train, train_preds)
                                 test_r2 = r2_score(y_test, test_preds)
                                 gap = float(train_r2 - test_r2)
@@ -2637,7 +2737,7 @@ if "mt_df" in st.session_state and isinstance(st.session_state.mt_df, pd.DataFra
                         st.error(f"Failed to save predictions: {e}")
 
             st.markdown("---")
-            st.subheader("Live Prediction (Original Table Style)")
+            st.subheader("Live Prediction")
             if "mt_live_alert" in st.session_state:
                 alert_data = st.session_state.pop("mt_live_alert", None)
                 if isinstance(alert_data, dict):
@@ -2675,20 +2775,25 @@ if "mt_df" in st.session_state and isinstance(st.session_state.mt_df, pd.DataFra
                 )
 
                 ordered_cols = df.columns.tolist()
+                ordered_input_cols = [c for c in ordered_cols if c != target_for_live]
                 template_df = pd.DataFrame(columns=ordered_cols)
                 for col in ordered_cols:
                     if col != target_for_live and pd.api.types.is_numeric_dtype(df[col]):
                         template_df[col] = template_df[col].astype(float)
+                template_df[target_for_live] = None
                 if "mt_live_table_df" not in st.session_state or not isinstance(st.session_state.mt_live_table_df, pd.DataFrame):
                     st.session_state.mt_live_table_df = template_df.copy()
+                else:
+                    st.session_state.mt_live_table_df = st.session_state.mt_live_table_df.reindex(columns=ordered_cols)
                 editor_col_config = {}
-                for col in ordered_cols:
-                    if col != target_for_live and pd.api.types.is_numeric_dtype(df[col]):
+                for col in ordered_input_cols:
+                    if pd.api.types.is_numeric_dtype(df[col]):
                         editor_col_config[col] = st.column_config.NumberColumn(
                             col,
                             step=0.01,
                             format="%.6f",
                         )
+                st.subheader("Live Prediction Output")
                 live_full_df = st.data_editor(
                     st.session_state.mt_live_table_df,
                     num_rows="dynamic",
@@ -2743,10 +2848,50 @@ if "mt_df" in st.session_state and isinstance(st.session_state.mt_df, pd.DataFra
                                 and str(target_for_live).strip().lower() == "salary"
                             ):
                                 live_preds = format_salary_label(live_preds)
+                            else:
+                                target_series = df[target_for_live]
+                                if problem_type == "Classification":
+                                    live_preds = pd.Series(live_preds).astype(str).values
+                                else:
+                                    target_num = pd.to_numeric(target_series, errors="coerce")
+                                    is_int_like_target = (
+                                        pd.api.types.is_integer_dtype(target_series)
+                                        or (
+                                            target_num.notna().any()
+                                            and np.allclose(target_num.dropna().values, np.round(target_num.dropna().values))
+                                        )
+                                    )
+                                    # If target was transformed earlier, map predictions back to original target scale.
+                                    trans_features = st.session_state.get("transformation_features", [])
+                                    before_df = st.session_state.get("transformation_before_df")
+                                    after_df = st.session_state.get("transformation_result_df")
+                                    if (
+                                        str(target_for_live) in trans_features
+                                        and isinstance(before_df, pd.DataFrame)
+                                        and isinstance(after_df, pd.DataFrame)
+                                        and target_for_live in before_df.columns
+                                        and target_for_live in after_df.columns
+                                    ):
+                                        x_after = pd.to_numeric(after_df[target_for_live], errors="coerce")
+                                        y_before = pd.to_numeric(before_df[target_for_live], errors="coerce")
+                                        valid = x_after.notna() & y_before.notna()
+                                        if int(valid.sum()) >= 10:
+                                            x_sorted = x_after[valid].to_numpy(dtype=float)
+                                            y_sorted = y_before[valid].to_numpy(dtype=float)
+                                            order_idx = np.argsort(x_sorted)
+                                            x_sorted = x_sorted[order_idx]
+                                            y_sorted = y_sorted[order_idx]
+                                            pred_num = pd.to_numeric(pd.Series(live_preds), errors="coerce").to_numpy(dtype=float)
+                                            mapped_pred = np.interp(pred_num, x_sorted, y_sorted)
+                                            live_preds = mapped_pred
+                                    if is_int_like_target:
+                                        live_preds = np.round(pd.to_numeric(pd.Series(live_preds), errors="coerce")).astype("Int64")
 
                             live_result_df = live_full_df.copy()
                             live_result_df[target_for_live] = live_preds
-                            st.session_state.mt_live_table_df = live_result_df.copy()
+                            st.session_state.mt_live_table_df = live_full_df.copy()
+                            st.session_state.mt_live_table_df[target_for_live] = None
+                            st.session_state.mt_live_result_df = live_result_df.copy()
                             st.success("Live prediction completed.")
                             st.session_state.mt_live_alert = {
                                 "model": selected_live_model,
@@ -2756,6 +2901,11 @@ if "mt_df" in st.session_state and isinstance(st.session_state.mt_df, pd.DataFra
                             st.rerun()
                     except Exception as e:
                         st.error(f"Live prediction failed: {e}")
+
+                if "mt_live_result_df" in st.session_state and isinstance(st.session_state.mt_live_result_df, pd.DataFrame):
+                    st.markdown("---")
+                    st.subheader("Live Prediction (Original Table Style)")
+                    st.dataframe(st.session_state.mt_live_result_df, use_container_width=True, height=280)
 
                 if "mt_live_table_df" in st.session_state and isinstance(st.session_state.mt_live_table_df, pd.DataFrame):
                     st.markdown("---")
@@ -2785,7 +2935,8 @@ if "mt_df" in st.session_state and isinstance(st.session_state.mt_df, pd.DataFra
                             target_dir = os.path.dirname(export_path)
                             if target_dir:
                                 os.makedirs(target_dir, exist_ok=True)
-                            st.session_state.mt_live_table_df.to_csv(export_path, index=False, encoding="utf-8-sig")
+                            export_df = st.session_state.get("mt_live_result_df", st.session_state.mt_live_table_df)
+                            export_df.to_csv(export_path, index=False, encoding="utf-8-sig")
                             st.success(f"Live table saved to: {export_path}")
                         except Exception as e:
                             st.error(f"Failed to save live table: {e}")

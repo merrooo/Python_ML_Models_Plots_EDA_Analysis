@@ -17,22 +17,24 @@ from sklearn.preprocessing import (
 from sklearn.ensemble import IsolationForest
 from sklearn.utils import resample
 
-
-
-
-
-
-
-
-
 try:
     from imblearn.over_sampling import SMOTE
     HAS_SMOTE = True
 except Exception:
     HAS_SMOTE = False
 
-st.set_page_config(page_title="Data Cleaning - NDEDC", layout="wide")
-st.title("Data Cleaning and Final Dataset Preparation")
+try:
+    import category_encoders as ce
+    HAS_CATEGORY_ENCODERS = True
+except Exception:
+    HAS_CATEGORY_ENCODERS = False
+
+st.set_page_config(page_title="NDEDC ML Workflow", layout="wide")
+st.title("Workflow: Cleaning -> Eda_Data -> Model_Training")
+st.sidebar.markdown("### Workflow Order")
+st.sidebar.markdown("1. Cleaning Data")
+st.sidebar.markdown("2. EDA_Data")
+st.sidebar.markdown("3. Model_Training")
 
 
 def convert_df(df_to_convert: pd.DataFrame) -> bytes:
@@ -173,9 +175,186 @@ def one_shot_checkbox(label: str, key: str) -> bool:
     return fired
 
 
+st.markdown("---")
+st.header("Step 2: EDA_Data")
+st.caption("Run this after finishing Step 1 (Cleaning Data).")
+
+
+def render_stage_eda(df_in: pd.DataFrame, stage_key: str, stage_title: str):
+    st.markdown(f"**Plots and Statistics: {stage_title}**")
+    if df_in is None or df_in.empty:
+        st.info("No data available for plots.")
+        return
+
+    numeric_cols = df_in.select_dtypes(include=[np.number]).columns.tolist()
+    if len(numeric_cols) == 0:
+        st.info("No numeric columns available for plots in this stage.")
+        return
+
+    # 1) Correlation heatmap
+    with st.expander(f"{stage_title} - Correlation Heatmap"):
+        if len(numeric_cols) < 2:
+            st.info("Need at least 2 numeric columns.")
+        else:
+            corr_method = st.radio(
+                "Correlation method:",
+                ["pearson", "spearman", "kendall"],
+                horizontal=True,
+                key=f"{stage_key}_corr_method",
+            )
+            corr_matrix = df_in[numeric_cols].corr(method=corr_method)
+            st.dataframe(corr_matrix, use_container_width=True, height=260)
+            fig_hm, ax_hm = plt.subplots(figsize=(max(7, len(numeric_cols) * 0.55), max(5, len(numeric_cols) * 0.45)))
+            sns.heatmap(corr_matrix, cmap="coolwarm", annot=False, linewidths=0.2, ax=ax_hm)
+            plt.xticks(rotation=45, ha="right")
+            plt.yticks(rotation=0)
+            st.pyplot(fig_hm)
+
+    # 2) Outlier summary + boxplot
+    with st.expander(f"{stage_title} - Outliers"):
+        out_stats = []
+        for col in numeric_cols:
+            q1, q3 = df_in[col].quantile([0.25, 0.75])
+            iqr = q3 - q1
+            low, up = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+            mask = (df_in[col] < low) | (df_in[col] > up)
+            out_stats.append({"column": col, "outlier_count": int(mask.sum()), "lower": float(low), "upper": float(up)})
+        out_df = pd.DataFrame(out_stats).sort_values("outlier_count", ascending=False)
+        st.dataframe(out_df, use_container_width=True, height=min(320, 36 * (len(out_df) + 1)))
+        out_col = st.selectbox("Column for outlier boxplot:", options=numeric_cols, key=f"{stage_key}_outlier_col")
+        fig_box, ax_box = plt.subplots(figsize=(8, 3))
+        sns.boxplot(x=df_in[out_col], ax=ax_box, color="#8ecae6")
+        st.pyplot(fig_box)
+
+    # 3) Histogram
+    with st.expander(f"{stage_title} - Histogram"):
+        hist_col = st.selectbox("Column for histogram:", options=numeric_cols, key=f"{stage_key}_hist_col")
+        bins = st.slider("Bins:", 10, 80, 30, 5, key=f"{stage_key}_hist_bins")
+        fig_hist, ax_hist = plt.subplots(figsize=(8, 3.5))
+        sns.histplot(df_in[hist_col].dropna(), bins=bins, kde=True, ax=ax_hist, color="#219ebc")
+        st.pyplot(fig_hist)
+
+    # 4) Dispersion / معدل الانتشار
+    with st.expander(f"{stage_title} - Dispersion (معدل الانتشار)"):
+        disp_rows = []
+        for col in numeric_cols:
+            s = df_in[col].dropna()
+            mean_val = float(s.mean()) if len(s) else 0.0
+            std_val = float(s.std()) if len(s) else 0.0
+            iqr_val = float(s.quantile(0.75) - s.quantile(0.25)) if len(s) else 0.0
+            cv = float(std_val / mean_val) if mean_val not in [0, 0.0] else np.nan
+            disp_rows.append(
+                {
+                    "column": col,
+                    "std": std_val,
+                    "variance": float(s.var()) if len(s) else 0.0,
+                    "IQR": iqr_val,
+                    "dispersion_rate_CV": cv,
+                }
+            )
+        disp_df = pd.DataFrame(disp_rows).sort_values("std", ascending=False)
+        st.dataframe(disp_df, use_container_width=True, height=min(320, 36 * (len(disp_df) + 1)))
+
+        st.markdown("**Scatter Plot Matrix**")
+        if len(numeric_cols) < 2:
+            st.info("Need at least 2 numeric columns for scatter matrix.")
+        else:
+            scatter_mode = st.radio(
+                "Scatter matrix mode:",
+                ["All numeric features", "Selected features", "One feature vs others"],
+                horizontal=True,
+                key=f"{stage_key}_disp_scatter_mode",
+            )
+            scatter_cols = []
+
+            if scatter_mode == "All numeric features":
+                max_cols = min(8, len(numeric_cols))
+                if max_cols <= 2:
+                    use_cols_count = 2
+                    st.caption("Using 2 features (available numeric features).")
+                else:
+                    use_cols_count = st.slider(
+                        "Number of features",
+                        min_value=2,
+                        max_value=max_cols,
+                        value=min(5, max_cols),
+                        key=f"{stage_key}_disp_scatter_all_count",
+                    )
+                scatter_cols = numeric_cols[:use_cols_count]
+            elif scatter_mode == "Selected features":
+                scatter_cols = st.multiselect(
+                    "Select features (min 2):",
+                    options=numeric_cols,
+                    default=numeric_cols[: min(4, len(numeric_cols))],
+                    key=f"{stage_key}_disp_scatter_selected",
+                )
+            else:
+                focus_col = st.selectbox(
+                    "Focus feature:",
+                    options=numeric_cols,
+                    key=f"{stage_key}_disp_scatter_focus",
+                )
+                compare_opts = [c for c in numeric_cols if c != focus_col]
+                compare_cols = st.multiselect(
+                    "Compare with:",
+                    options=compare_opts,
+                    default=compare_opts[: min(3, len(compare_opts))],
+                    key=f"{stage_key}_disp_scatter_compare",
+                )
+                scatter_cols = [focus_col] + compare_cols
+
+            if len(scatter_cols) < 2:
+                st.info("Please select at least 2 features.")
+            else:
+                max_rows = min(3000, len(df_in))
+                min_rows = min(200, len(df_in))
+                if max_rows <= min_rows:
+                    sample_rows = max_rows
+                    st.caption(f"Using all available rows: {sample_rows}")
+                else:
+                    sample_rows = st.slider(
+                        "Rows for scatter matrix (sampled):",
+                        min_value=min_rows,
+                        max_value=max_rows,
+                        value=min(1000, max_rows),
+                        key=f"{stage_key}_disp_scatter_rows",
+                    )
+                scatter_df = df_in[scatter_cols].dropna()
+                if len(scatter_df) > sample_rows:
+                    scatter_df = scatter_df.sample(sample_rows, random_state=42)
+                if scatter_df.empty:
+                    st.info("No rows left after dropping missing values.")
+                else:
+                    g = sns.pairplot(scatter_df, corner=True, diag_kind="hist")
+                    st.pyplot(g.fig)
+                    plt.close(g.fig)
+
+    # 5) Skewness
+    with st.expander(f"{stage_title} - Skewness"):
+        skew_df = pd.DataFrame(
+            {
+                "column": numeric_cols,
+                "skewness": [float(df_in[c].skew()) for c in numeric_cols],
+            }
+        )
+        skew_df["abs_skewness"] = skew_df["skewness"].abs()
+        skew_df["skew_direction"] = skew_df["skewness"].apply(
+            lambda x: "right" if x > 0.5 else ("left" if x < -0.5 else "near-symmetric")
+        )
+        skew_df = skew_df.sort_values("abs_skewness", ascending=False)
+        st.dataframe(skew_df, use_container_width=True, height=min(320, 36 * (len(skew_df) + 1)))
+        fig_sk, ax_sk = plt.subplots(figsize=(8, max(3, len(skew_df) * 0.22)))
+        sns.barplot(data=skew_df, x="skewness", y="column", ax=ax_sk, color="#ffb703")
+        ax_sk.axvline(0, color="black", linewidth=1)
+        st.pyplot(fig_sk)
+
+
 # ------------------------------------------------------------------
 # 1. Data Source (Upload or GitHub)
 # ------------------------------------------------------------------
+st.markdown("---")
+st.header("Step 1: Cleaning Data")
+st.caption("Start here: load, clean, encode, transform, and balance your dataset.")
 if "df" not in st.session_state:
     st.info("Please upload a dataset file to get started.")
     upload_col, github_col = st.columns(2)
@@ -283,16 +462,56 @@ if "df" in st.session_state:
         st.caption("Use this when columns are IDs, duplicates, leakage, or irrelevant for modeling.")
         all_columns = st.session_state.df.columns.tolist()
         cols_to_drop = st.multiselect("Select columns to drop:", options=all_columns)
+        st.markdown("**Preview Before Drop**")
+        st.caption(f"Current shape: {st.session_state.df.shape[0]} rows x {st.session_state.df.shape[1]} columns")
+        st.dataframe(st.session_state.df.head(20), use_container_width=True, height=260)
+
+        if cols_to_drop:
+            preview_after_drop = st.session_state.df.drop(columns=cols_to_drop, errors="ignore")
+            st.markdown("**Preview After Drop (Before Apply)**")
+            st.caption(
+                f"After dropping {len(cols_to_drop)} column(s): "
+                f"{preview_after_drop.shape[0]} rows x {preview_after_drop.shape[1]} columns"
+            )
+            st.dataframe(preview_after_drop.head(20), use_container_width=True, height=260)
 
         if one_shot_checkbox("Confirm Drop", "confirm_drop_chk"):
             if cols_to_drop:
+                before_df = st.session_state.df.copy()
                 st.session_state.df.drop(columns=cols_to_drop, inplace=True)
+                st.session_state.drop_columns_last = cols_to_drop
+                st.session_state.drop_before_preview_df = before_df.head(20).copy()
+                st.session_state.drop_after_preview_df = st.session_state.df.head(20).copy()
+                st.session_state.drop_before_shape = before_df.shape
+                st.session_state.drop_after_shape = st.session_state.df.shape
                 st.session_state.df.to_csv("Data_Dropped_Columns.csv", index=False, encoding="utf-8-sig")
                 st.success("Columns dropped successfully.")
                 st.rerun()
 
+        if "drop_columns_last" in st.session_state:
+            st.markdown("**Last Applied Drop Result**")
+            st.caption(f"Dropped columns: {st.session_state.get('drop_columns_last', [])}")
+            b_shape = st.session_state.get("drop_before_shape", ("?", "?"))
+            a_shape = st.session_state.get("drop_after_shape", ("?", "?"))
+            st.caption(f"Shape before: {b_shape[0]} x {b_shape[1]} | after: {a_shape[0]} x {a_shape[1]}")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.write("Before (head)")
+                st.dataframe(
+                    st.session_state.get("drop_before_preview_df", pd.DataFrame()),
+                    use_container_width=True,
+                    height=260,
+                )
+            with c2:
+                st.write("After (head)")
+                st.dataframe(
+                    st.session_state.get("drop_after_preview_df", pd.DataFrame()),
+                    use_container_width=True,
+                    height=260,
+                )
+
     # --- 2. Encoding ---
-    with st.expander("2) Encode Text Columns (One-Hot / Label)"):
+    with st.expander("2) Encode Text Columns (One-Hot / Label / Target / Binary)"):
         st.caption("Convert text categories to numeric form before training ML models.")
         obj_cols = st.session_state.df.select_dtypes(include=["object"]).columns.tolist()
         if obj_cols:
@@ -321,12 +540,79 @@ if "df" in st.session_state:
                 value_counts_df.columns = [view_col, "count"]
                 st.dataframe(value_counts_df.head(20), use_container_width=True, height=260)
 
-            method = st.radio("Encoding method:", ["One-Hot Encoding", "Label Encoding"])
+            method = st.radio(
+                "Encoding method:",
+                [
+                    "One-Hot Encoding",
+                    "Label Encoding",
+                    "Target Encoding (Mean)",
+                    "Binary Encoding",
+                ],
+            )
+            st.markdown("**Encoding Methods Discussion**")
+            enc_discussion_df = pd.DataFrame(
+                [
+                    {
+                        "method": "One-Hot Encoding",
+                        "why_use_it": "Safe default for nominal categories.",
+                        "pro": "No fake ranking between categories.",
+                        "con": "Creates many columns for high-cardinality features.",
+                    },
+                    {
+                        "method": "Label Encoding",
+                        "why_use_it": "Useful for ordinal categories or tree-based quick baselines.",
+                        "pro": "Simple and compact.",
+                        "con": "Can imply false numeric order for nominal categories.",
+                    },
+                    {
+                        "method": "Target Encoding (Mean)",
+                        "why_use_it": "High-cardinality features (e.g., car model) with numeric target like price.",
+                        "pro": "Keeps dataset compact (single encoded column).",
+                        "con": "Overfitting risk; use smoothing and optional Leave-One-Out.",
+                    },
+                    {
+                        "method": "Binary Encoding",
+                        "why_use_it": "Balanced option for high-cardinality categories.",
+                        "pro": "Far fewer columns than One-Hot.",
+                        "con": "Less directly interpretable than One-Hot.",
+                    },
+                ]
+            )
+            st.dataframe(enc_discussion_df, use_container_width=True, height=230)
             st.caption(
-                "Use One-Hot for nominal categories (no order). Use Label Encoding for ordinal categories "
-                "(example: low=0, medium=1, high=2)."
+                "Binary Encoding note: for ~1,167 categories, about 11 binary columns can represent all values."
             )
             selected_enc = st.multiselect("Select columns to encode:", options=obj_cols)
+
+            target_enc_target_col = None
+            target_enc_smoothing = 20.0
+            target_enc_use_loo = False
+            if method == "Target Encoding (Mean)":
+                all_cols_for_target = st.session_state.df.columns.tolist()
+                default_target_idx = len(all_cols_for_target) - 1 if all_cols_for_target else 0
+                preferred_target = st.session_state.get("model_output_col")
+                if preferred_target in all_cols_for_target:
+                    default_target_idx = all_cols_for_target.index(preferred_target)
+                target_enc_target_col = st.selectbox(
+                    "Target column for mean encoding (numeric target recommended):",
+                    options=all_cols_for_target,
+                    index=default_target_idx,
+                    key="target_enc_target_col",
+                )
+                target_enc_smoothing = st.slider(
+                    "Smoothing strength (higher = less overfitting):",
+                    min_value=1.0,
+                    max_value=100.0,
+                    value=20.0,
+                    step=1.0,
+                    key="target_enc_smoothing",
+                )
+                target_enc_use_loo = st.checkbox(
+                    "Use Leave-One-Out style target encoding",
+                    value=True,
+                    key="target_enc_use_loo",
+                )
+
             output_file_name = st.text_input(
                 "Final processed file name (CSV):",
                 value=st.session_state.get("encoded_output_file", "final_process_encoded_data.csv"),
@@ -349,7 +635,7 @@ if "df" in st.session_state:
                     )
                     st.write("Sample after One-Hot Encoding:")
                     st.dataframe(onehot_preview, use_container_width=True, height=260)
-                else:
+                elif method == "Label Encoding":
                     st.write("Label mapping per selected column:")
                     for col in selected_enc:
                         series_as_str = st.session_state.df[col].astype(str).str.strip().str.lower()
@@ -388,9 +674,106 @@ if "df" in st.session_state:
                             )
                     st.write("Sample after Label Encoding:")
                     st.dataframe(label_preview, use_container_width=True, height=230)
+                elif method == "Target Encoding (Mean)":
+                    if target_enc_target_col in selected_enc:
+                        st.warning("Do not include target column itself in selected encoding columns.")
+                    else:
+                        te_preview_df = st.session_state.df.copy()
+                        y_num = pd.to_numeric(te_preview_df[target_enc_target_col], errors="coerce")
+                        if y_num.notna().sum() == 0:
+                            st.warning("Target Encoding needs a numeric target (or convertible to numeric).")
+                        elif not HAS_CATEGORY_ENCODERS:
+                            st.warning("`category_encoders` is not installed. Using internal fallback encoding.")
+                            global_mean = float(y_num.mean())
+                            sample_te = te_preview_df[selected_enc].head(10).copy()
+                            for col in selected_enc:
+                                cat = te_preview_df[col].where(te_preview_df[col].notna(), "__missing__").astype(str).str.strip().str.lower()
+                                grp = pd.DataFrame({"cat": cat, "y": y_num})
+                                agg = grp.groupby("cat")["y"].agg(["mean", "count", "sum"])
+                                smooth_map = (
+                                    (agg["count"] * agg["mean"] + target_enc_smoothing * global_mean)
+                                    / (agg["count"] + target_enc_smoothing)
+                                )
+                                cat_head = (
+                                    te_preview_df[col]
+                                    .head(10)
+                                    .where(te_preview_df[col].head(10).notna(), "__missing__")
+                                    .astype(str)
+                                    .str.strip()
+                                    .str.lower()
+                                )
+                                if target_enc_use_loo:
+                                    y_head = pd.to_numeric(te_preview_df[target_enc_target_col].head(10), errors="coerce")
+                                    loo_vals = []
+                                    for idx_row, cat_val in cat_head.items():
+                                        if cat_val not in agg.index or pd.isna(y_head.loc[idx_row]):
+                                            loo_vals.append(global_mean)
+                                            continue
+                                        c = float(agg.loc[cat_val, "count"])
+                                        s = float(agg.loc[cat_val, "sum"])
+                                        yv = float(y_head.loc[idx_row])
+                                        denom = (c - 1.0) + target_enc_smoothing
+                                        if denom <= 0:
+                                            loo_vals.append(global_mean)
+                                        else:
+                                            loo_vals.append(((s - yv) + target_enc_smoothing * global_mean) / denom)
+                                    sample_te[col] = loo_vals
+                                else:
+                                    sample_te[col] = cat_head.map(smooth_map).fillna(global_mean)
+                            st.write("Sample after Target Encoding (Mean):")
+                            st.dataframe(sample_te, use_container_width=True, height=230)
+                        else:
+                            x_te = (
+                                te_preview_df[selected_enc]
+                                .where(te_preview_df[selected_enc].notna(), "__missing__")
+                                .astype(str)
+                                .apply(lambda s: s.str.strip().str.lower())
+                            )
+                            valid_mask = y_num.notna()
+                            if valid_mask.sum() == 0:
+                                st.warning("Target Encoding needs non-null numeric target values.")
+                            else:
+                                if target_enc_use_loo:
+                                    enc = ce.LeaveOneOutEncoder(cols=selected_enc)
+                                else:
+                                    enc = ce.TargetEncoder(cols=selected_enc, smoothing=target_enc_smoothing)
+                                enc.fit(x_te.loc[valid_mask], y_num.loc[valid_mask])
+                                sample_te = enc.transform(x_te).head(10)
+                            st.write("Sample after Target Encoding (Mean):")
+                            st.dataframe(sample_te, use_container_width=True, height=230)
+                else:
+                    st.write("Binary encoding summary per selected column:")
+                    bin_rows = []
+                    sample_binary = pd.DataFrame(index=st.session_state.df.head(10).index)
+                    for col in selected_enc:
+                        cat = (
+                            st.session_state.df[col]
+                            .where(st.session_state.df[col].notna(), "__missing__")
+                            .astype(str)
+                            .str.strip()
+                            .str.lower()
+                        )
+                        uniq = sorted(cat.dropna().unique().tolist())
+                        code_map = {v: i + 1 for i, v in enumerate(uniq)}
+                        bits = max(1, int(np.ceil(np.log2(len(code_map) + 1))))
+                        codes_head = cat.head(10).map(code_map).fillna(0).astype(int)
+                        codes_head_arr = codes_head.to_numpy(dtype=np.int64)
+                        for b in range(bits):
+                            sample_binary[f"{col}_bin_{b+1}"] = np.right_shift(codes_head_arr, b) & 1
+                        bin_rows.append(
+                            {
+                                "column": col,
+                                "unique_categories": len(code_map),
+                                "binary_columns_created": bits,
+                            }
+                        )
+                    st.dataframe(pd.DataFrame(bin_rows), use_container_width=True, height=220)
+                    st.write("Sample after Binary Encoding:")
+                    st.dataframe(sample_binary, use_container_width=True, height=230)
 
             if one_shot_checkbox("Apply Encoding", "apply_encoding_chk"):
                 if selected_enc:
+                    apply_ok = True
                     if method == "One-Hot Encoding":
                         st.session_state.df = pd.get_dummies(
                             st.session_state.df,
@@ -398,7 +781,7 @@ if "df" in st.session_state:
                             drop_first=True,
                             dtype=int,
                         )
-                    else:
+                    elif method == "Label Encoding":
                         le = LabelEncoder()
                         for col in selected_enc:
                             if col.lower() == "salary":
@@ -414,15 +797,93 @@ if "df" in st.session_state:
                                 st.session_state.df[col] = le.fit_transform(
                                     st.session_state.df[col].astype(str).str.strip().str.lower()
                                 )
+                    elif method == "Target Encoding (Mean)":
+                        if target_enc_target_col in selected_enc:
+                            st.error("Target column cannot be encoded by itself. Remove it from selected columns.")
+                            apply_ok = False
+                        y_num = pd.to_numeric(st.session_state.df[target_enc_target_col], errors="coerce")
+                        if apply_ok and y_num.notna().sum() == 0:
+                            st.error("Target Encoding requires numeric target values.")
+                            apply_ok = False
+                        if apply_ok:
+                            x_te = (
+                                st.session_state.df[selected_enc]
+                                .where(st.session_state.df[selected_enc].notna(), "__missing__")
+                                .astype(str)
+                                .apply(lambda s: s.str.strip().str.lower())
+                            )
+                            valid_mask = y_num.notna()
+                            if valid_mask.sum() == 0:
+                                st.error("Target Encoding needs non-null numeric target values.")
+                                apply_ok = False
+                            elif HAS_CATEGORY_ENCODERS:
+                                if target_enc_use_loo:
+                                    enc = ce.LeaveOneOutEncoder(cols=selected_enc)
+                                else:
+                                    enc = ce.TargetEncoder(cols=selected_enc, smoothing=target_enc_smoothing)
+                                enc.fit(x_te.loc[valid_mask], y_num.loc[valid_mask])
+                                transformed = enc.transform(x_te)
+                                st.session_state.df[selected_enc] = transformed[selected_enc]
+                            else:
+                                global_mean = float(y_num.mean())
+                                for col in selected_enc:
+                                    cat = (
+                                        st.session_state.df[col]
+                                        .where(st.session_state.df[col].notna(), "__missing__")
+                                        .astype(str)
+                                        .str.strip()
+                                        .str.lower()
+                                    )
+                                    grp = pd.DataFrame({"cat": cat, "y": y_num})
+                                    agg = grp.groupby("cat")["y"].agg(["mean", "count", "sum"])
+                                    if target_enc_use_loo:
+                                        te_vals = []
+                                        for idx_row, cat_val in cat.items():
+                                            yv = y_num.loc[idx_row]
+                                            if cat_val not in agg.index or pd.isna(yv):
+                                                te_vals.append(global_mean)
+                                                continue
+                                            c = float(agg.loc[cat_val, "count"])
+                                            s = float(agg.loc[cat_val, "sum"])
+                                            denom = (c - 1.0) + target_enc_smoothing
+                                            if denom <= 0:
+                                                te_vals.append(global_mean)
+                                            else:
+                                                te_vals.append(((s - float(yv)) + target_enc_smoothing * global_mean) / denom)
+                                        st.session_state.df[col] = te_vals
+                                    else:
+                                        smooth_map = (
+                                            (agg["count"] * agg["mean"] + target_enc_smoothing * global_mean)
+                                            / (agg["count"] + target_enc_smoothing)
+                                        )
+                                        st.session_state.df[col] = cat.map(smooth_map).fillna(global_mean)
+                    else:
+                        for col in selected_enc:
+                            cat = (
+                                st.session_state.df[col]
+                                .where(st.session_state.df[col].notna(), "__missing__")
+                                .astype(str)
+                                .str.strip()
+                                .str.lower()
+                            )
+                            uniq = sorted(cat.dropna().unique().tolist())
+                            code_map = {v: i + 1 for i, v in enumerate(uniq)}
+                            bits = max(1, int(np.ceil(np.log2(len(code_map) + 1))))
+                            codes = cat.map(code_map).fillna(0).astype(int)
+                            codes_arr = codes.to_numpy(dtype=np.int64)
+                            for b in range(bits):
+                                st.session_state.df[f"{col}_bin_{b+1}"] = np.right_shift(codes_arr, b) & 1
+                        st.session_state.df.drop(columns=selected_enc, inplace=True, errors="ignore")
 
-                    st.session_state.df.to_csv("Data_Encoded.csv", index=False, encoding="utf-8-sig")
-                    st.session_state.encoding_applied = True
-                    st.session_state.last_encoding_method = method
-                    st.session_state.encoded_output_file = output_file_name
-                    st.session_state.encoding_result_df = st.session_state.df.copy()
-                    st.session_state.show_encoded_preview = False
-                    st.success("Encoding applied successfully.")
-                    st.rerun()
+                    if apply_ok:
+                        st.session_state.df.to_csv("Data_Encoded.csv", index=False, encoding="utf-8-sig")
+                        st.session_state.encoding_applied = True
+                        st.session_state.last_encoding_method = method
+                        st.session_state.encoded_output_file = output_file_name
+                        st.session_state.encoding_result_df = st.session_state.df.copy()
+                        st.session_state.show_encoded_preview = False
+                        st.success("Encoding applied successfully.")
+                        st.rerun()
         else:
             st.write("No object columns found.")
 
@@ -436,6 +897,7 @@ if "df" in st.session_state:
             if st.session_state.get("show_encoded_preview", False):
                 encoded_preview_df = st.session_state.get("encoding_result_df", st.session_state.df)
                 st.dataframe(encoded_preview_df.head(30), use_container_width=True, height=320)
+                render_stage_eda(encoded_preview_df, "encoded_preview", "Encoded Preview")
                 default_name = st.session_state.get("encoded_output_file", "final_process_encoded_data.csv")
                 project_folders = list_project_folders(os.getcwd(), max_depth=4)
                 selected_folder = st.selectbox(
@@ -491,40 +953,6 @@ if "df" in st.session_state:
 - Use balancing (including SMOTE) for class imbalance.
 """
             )
-
-        st.markdown("---")
-        with st.expander("Feature Correlation (All Numeric Features)"):
-            st.caption("Choose output/target first, then inspect strongest to weakest correlations.")
-            corr_method = st.radio(
-                "Correlation method:",
-                ["pearson", "spearman", "kendall"],
-                horizontal=True,
-                key="corr_method_radio",
-            )
-            corr_df = st.session_state.df.select_dtypes(include=[np.number])
-            if corr_df.shape[1] >= 2:
-                corr_matrix = corr_df.corr(method=corr_method)
-                st.write("Correlation matrix:")
-                st.dataframe(corr_matrix, use_container_width=True, height=320)
-
-                target_feature = st.selectbox(
-                    "Choose output/feature for correlation ranking:",
-                    options=corr_df.columns.tolist(),
-                    key="corr_target_feature",
-                )
-                target_corr = corr_matrix[target_feature].drop(labels=[target_feature]).reset_index()
-                target_corr.columns = ["feature", "correlation"]
-                target_corr["abs_correlation"] = target_corr["correlation"].abs()
-                target_corr = target_corr.sort_values("abs_correlation", ascending=False)
-
-                st.write(f"Correlations vs `{target_feature}` (strongest to weakest):")
-                st.dataframe(
-                    target_corr[["feature", "correlation", "abs_correlation"]],
-                    use_container_width=True,
-                    height=320,
-                )
-            else:
-                st.info("Need at least 2 numeric columns to compute correlation.")
 
     # --- 3. Feature Transformation ---
     with st.expander("3) Feature Transformation (Scaling)"):
@@ -766,6 +1194,7 @@ if "df" in st.session_state:
                 tr = st.session_state.get("transformation_result_df", st.session_state.df)
                 st.write(f"Transformed data rows: {tr.shape[0]} | columns: {tr.shape[1]}")
                 st.dataframe(tr.head(30), use_container_width=True, height=320)
+                render_stage_eda(tr, "transformed_preview", "Transformation Preview")
                 applied_cols = st.session_state.get("transformation_features", [])
                 if applied_cols:
                     st.markdown("**Skewness check (before vs after apply):**")
@@ -1029,6 +1458,7 @@ if "df" in st.session_state:
             st.write("Class distribution (after):")
             st.dataframe(after_counts, use_container_width=True, height=240)
             st.dataframe(bdf.head(30), use_container_width=True, height=300)
+            render_stage_eda(bdf, "balanced_preview", "Balanced Preview")
 
             default_name = st.session_state.get("balance_output_file", "final_process_balanced_data.csv")
             project_folders = list_project_folders(os.getcwd(), max_depth=4)
@@ -1140,15 +1570,13 @@ if "df" in st.session_state:
             )
             st.dataframe(hint_df, use_container_width=True, height=320)
             st.info("Go to the Model Training page to split the data and train models.")
+
 import os
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 import streamlit as st
-
-st.set_page_config(page_title="EDA - NDEDC Dashboard", layout="wide")
-st.title("EDA: Multi-Table Visual Analysis")
 
 
 def find_default_sheet(sheet_names, keywords):
@@ -1216,7 +1644,84 @@ def render_eda_for_table(df: pd.DataFrame, table_name: str):
         st.info("Need at least 2 numeric columns for heatmap.")
 
     st.markdown("---")
-    st.subheader("3) Skewness Plots")
+    st.subheader("3) Scatter Plot Matrix")
+    if numeric_df.shape[1] < 2:
+        st.info("Need at least 2 numeric columns for a scatter plot matrix.")
+    else:
+        scatter_mode = st.radio(
+            "Scatter matrix mode:",
+            ["All numeric features", "Selected features", "One feature vs others"],
+            horizontal=True,
+            key=f"scatter_mode_{table_name}",
+        )
+        numeric_cols = numeric_df.columns.tolist()
+        plot_cols = []
+
+        if scatter_mode == "All numeric features":
+            max_cols = min(8, len(numeric_cols))
+            if max_cols <= 2:
+                use_cols_count = 2
+                st.caption("Using 2 features (available numeric features).")
+            else:
+                use_cols_count = st.slider(
+                    "Number of numeric features to include",
+                    min_value=2,
+                    max_value=max_cols,
+                    value=min(5, max_cols),
+                    key=f"scatter_all_count_{table_name}",
+                )
+            plot_cols = numeric_cols[:use_cols_count]
+        elif scatter_mode == "Selected features":
+            selected_cols = st.multiselect(
+                "Select numeric features (min 2)",
+                options=numeric_cols,
+                default=numeric_cols[: min(4, len(numeric_cols))],
+                key=f"scatter_selected_cols_{table_name}",
+            )
+            plot_cols = selected_cols
+        else:
+            focus_col = st.selectbox(
+                "Focus feature",
+                options=numeric_cols,
+                key=f"scatter_focus_col_{table_name}",
+            )
+            compare_candidates = [c for c in numeric_cols if c != focus_col]
+            compare_cols = st.multiselect(
+                "Compare focus feature with",
+                options=compare_candidates,
+                default=compare_candidates[: min(3, len(compare_candidates))],
+                key=f"scatter_compare_cols_{table_name}",
+            )
+            plot_cols = [focus_col] + compare_cols
+
+        if len(plot_cols) < 2:
+            st.info("Please select at least 2 features.")
+        else:
+            max_rows = min(3000, len(df))
+            min_rows = min(200, len(df))
+            if max_rows <= min_rows:
+                sample_rows = max_rows
+                st.caption(f"Using all available rows: {sample_rows}")
+            else:
+                sample_rows = st.slider(
+                    "Rows used for matrix (sampling for speed)",
+                    min_value=min_rows,
+                    max_value=max_rows,
+                    value=min(1000, max_rows),
+                    key=f"scatter_rows_{table_name}",
+                )
+            plot_df = df[plot_cols].dropna()
+            if len(plot_df) > sample_rows:
+                plot_df = plot_df.sample(sample_rows, random_state=42)
+            if plot_df.empty:
+                st.info("No rows left after dropping missing values for selected features.")
+            else:
+                g = sns.pairplot(plot_df, corner=True, diag_kind="hist")
+                st.pyplot(g.fig)
+                plt.close(g.fig)
+
+    st.markdown("---")
+    st.subheader("4) Skewness Plots")
     if numeric_df.shape[1] == 0:
         st.info("No numeric columns available for skew plots.")
     else:
@@ -1244,7 +1749,7 @@ def render_eda_for_table(df: pd.DataFrame, table_name: str):
                 st.pyplot(fig_sk)
 
     st.markdown("---")
-    st.subheader("4) General Statistics")
+    st.subheader("5) General Statistics")
     t1, t2, t3 = st.tabs(["Describe", "Unique Values", "Missing Values"])
     with t1:
         if not numeric_df.empty:
@@ -1257,7 +1762,7 @@ def render_eda_for_table(df: pd.DataFrame, table_name: str):
         st.dataframe(df.isnull().sum().to_frame("missing_count"), use_container_width=True)
 
     st.markdown("---")
-    st.subheader("5) Value Frequency")
+    st.subheader("6) Value Frequency")
     col_a, col_b = st.columns([1, 2])
     with col_a:
         freq_col = st.selectbox(
@@ -1277,7 +1782,7 @@ def render_eda_for_table(df: pd.DataFrame, table_name: str):
         st.pyplot(fig2)
 
     st.markdown("---")
-    st.subheader("6) Distribution + Outlier Check")
+    st.subheader("7) Distribution + Outlier Check")
     if numeric_df.shape[1] == 0:
         st.info("No numeric columns for distribution/outlier analysis.")
         return
@@ -1362,7 +1867,9 @@ elif not loaded_tables:
 
 if loaded_tables:
     st.markdown("---")
-    tabs = st.tabs(list(loaded_tables.keys()))import os
+    tabs = st.tabs(list(loaded_tables.keys()))
+
+import os
 import json
 
 import pandas as pd
@@ -1401,8 +1908,9 @@ except Exception:
     HAS_XGBOOST = False
 
 
-st.set_page_config(page_title="Model Training - NDEDC", layout="wide")
-st.title("Model Training")
+st.markdown("---")
+st.header("Step 3: Model_Training")
+st.caption("Run this after Step 2 (EDA_Data).")
 
 
 def normalize_github_url(url: str) -> str:
@@ -2283,9 +2791,3 @@ if "mt_df" in st.session_state and isinstance(st.session_state.mt_df, pd.DataFra
                             st.error(f"Failed to save live table: {e}")
 else:
     st.info("Load a dataset first from session, PC upload, or GitHub URL.")
-
-    for tab, (name, table_df) in zip(tabs, loaded_tables.items()):
-        with tab:
-            render_eda_for_table(table_df, name)
-else:
-    st.info("Upload data to start EDA for Main, Encoded, and Outliers tables.")

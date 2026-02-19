@@ -1,2 +1,0 @@
-﻿Model,Train RMSE,Test RMSE,Train Rآ²,Test Rآ²,Gap,Fit Status
-XGBoost,0.0029,0.6505,1.0,0.804,0.196,Likely overfitting

@@ -12,12 +12,6 @@ ENCODING_DISCUSSION = [
         "Risks": "May inject false order for nominal values",
     },
     {
-        "Method": "Unique Binary Encoding (1 Column)",
-        "When to use": "High-cardinality categories with one-column requirement",
-        "Benefits": "Compact and deterministic per category",
-        "Risks": "String-like representation needs careful model preprocessing",
-    },
-    {
         "Method": "Binary Encoding",
         "When to use": "High-cardinality categories with multiple bit columns",
         "Benefits": "Lower dimensionality than one-hot",

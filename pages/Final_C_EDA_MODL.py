@@ -55,7 +55,7 @@ def render_date_features():
     drop_original = st.checkbox("Drop original date columns after split", value=True)
     
     # Preview date parsing
-    with st.expander("ًں”چ Date Parsing Preview"):
+    with st.expander("Date Parsing Preview"):
         parse_summary = []
         for col in date_cols:
             try:
@@ -362,7 +362,7 @@ def render_encoding():
     st.dataframe(summary_df, use_container_width=True)
     
     # Inspect column values
-    with st.expander("ًں”چ Inspect Column Values"):
+    with st.expander("Inspect Column Values"):
         view_col = st.selectbox("Select column to inspect:", obj_cols, key="enc_view_col")
         if view_col:
             col1, col2 = st.columns(2)
@@ -377,13 +377,13 @@ def render_encoding():
     # Encoding method selection
     method = st.radio(
         "Encoding method:",
-        ["One-Hot Encoding", "Label Encoding", "Unique Binary Encoding", "Binary Encoding"],
+        ["One-Hot Encoding", "Label Encoding", "Binary Encoding"],
         horizontal=True,
         key="enc_method"
     )
     
     # Method discussion
-    with st.expander("ًں“ڑ Encoding Methods Explained"):
+    with st.expander("Encoding Methods Explained"):
         st.dataframe(ENCODING_DISCUSSION, use_container_width=True, hide_index=True)
     
     # Column selection
@@ -415,22 +415,7 @@ def render_encoding():
             st.write(f"**{col}** - {len(le.classes_)} unique values")
             st.dataframe(mapping_df, use_container_width=True)
     
-    elif method == "Unique Binary Encoding":
-        force_min_bits = 10
-        preview_encoded = preview_df[selected_cols].copy()
-        for col in selected_cols:
-            col_data = preview_df[col].astype(str).str.strip().str.lower()
-            uniq = sorted(col_data.unique())
-            bits = max(force_min_bits, int(np.ceil(np.log2(len(uniq) + 1))))
-            code_map = {v: i+1 for i, v in enumerate(uniq)}
-            preview_encoded[col] = col_data.map(code_map).fillna(0).astype(int).apply(
-                lambda x: format(x, f'0{bits}b')
-            )
-        st.markdown("**Preview after Unique Binary Encoding:**")
-        st.dataframe(preview_encoded, use_container_width=True)
-        st.caption(f"Values converted to {bits}-bit binary strings")
-    
-    else:  # Binary Encoding
+    elif method == "Binary Encoding":
         binary_preview = pd.DataFrame()
         bin_summary = []
         
@@ -490,18 +475,7 @@ def render_encoding():
                             work_df[col].astype(str).str.strip().str.lower()
                         )
             
-            elif method == "Unique Binary Encoding":
-                force_min_bits = 10
-                for col in selected_cols:
-                    col_data = work_df[col].astype(str).str.strip().str.lower()
-                    uniq = sorted(col_data.unique())
-                    bits = max(force_min_bits, int(np.ceil(np.log2(len(uniq) + 1))))
-                    code_map = {v: i+1 for i, v in enumerate(uniq)}
-                    work_df[col] = col_data.map(code_map).fillna(0).astype(int).apply(
-                        lambda x: format(x, f'0{bits}b')
-                    )
-            
-            else:  # Binary Encoding
+            elif method == "Binary Encoding":
                 for col in selected_cols:
                     col_data = work_df[col].astype(str).str.strip().str.lower()
                     uniq = sorted(col_data.unique())
@@ -557,7 +531,7 @@ def build_skew_comparison(df_before, df_after, cols):
                 'Skew Before': round(skew_before, 3),
                 'Skew After': round(skew_after, 3),
                 'Change': round(abs(skew_after) - abs(skew_before), 3),
-                'Improved': 'âœ…' if abs(skew_after) < abs(skew_before) else 'â‌Œ'
+                'Improved': 'Yes' if abs(skew_after) < abs(skew_before) else 'NO'
             })
     return pd.DataFrame(rows).sort_values('Skew Before', ascending=False)
 
@@ -620,7 +594,7 @@ def render_transformation():
     # Detect binary columns (should not be transformed)
     binary_cols = detect_binary_columns(df)
     if binary_cols:
-        st.warning(f"âڑ ï¸ڈ Detected {len(binary_cols)} binary columns (0/1). These should NOT be transformed.")
+        st.warning(f"Detected {len(binary_cols)} binary columns (0/1). These should NOT be transformed.")
         with st.expander("View binary columns"):
             st.write(binary_cols)
     
@@ -639,7 +613,7 @@ def render_transformation():
     )
     
     # Method guidance
-    with st.expander("ًں“ڑ When to use each method"):
+    with st.expander("When to use each method"):
         st.dataframe(TRANSFORMATION_DISCUSSION, use_container_width=True, hide_index=True)
     
     # Skewness analysis
@@ -661,6 +635,7 @@ def render_transformation():
     
     # Column selection
     st.markdown("**Select features to transform:**")
+    st.dataframe(df[numeric_cols].head(15), use_container_width=True, height=260)
     
     quick_select = st.radio(
         "Quick select:",
@@ -669,15 +644,22 @@ def render_transformation():
         key="transform_quick_select"
     )
     
-    if quick_select == "All":
-        default_selections = numeric_cols
-    elif quick_select == "Right-skewed only":
-        default_selections = right_skewed
-    else:
-        default_selections = []
+    # Sync checkbox state when quick-select mode changes
+    prev_quick_select = st.session_state.get("transform_quick_select_prev")
+    if prev_quick_select != quick_select:
+        for col in numeric_cols:
+            chk_key = f"transform_chk_{col}"
+            if quick_select == "All":
+                st.session_state[chk_key] = True
+            elif quick_select == "Right-skewed only":
+                st.session_state[chk_key] = col in right_skewed
+            elif quick_select == "None":
+                st.session_state[chk_key] = False
+            elif chk_key not in st.session_state:
+                st.session_state[chk_key] = False
+        st.session_state.transform_quick_select_prev = quick_select
     
     # Create checkboxes
-    selected_cols = []
     cols_per_row = 4
     
     for i, col in enumerate(numeric_cols):
@@ -686,11 +668,17 @@ def render_transformation():
         
         chk_key = f"transform_chk_{col}"
         if chk_key not in st.session_state:
-            st.session_state[chk_key] = col in default_selections
+            if quick_select == "All":
+                st.session_state[chk_key] = True
+            elif quick_select == "Right-skewed only":
+                st.session_state[chk_key] = col in right_skewed
+            else:
+                st.session_state[chk_key] = False
         
         with cols[i % cols_per_row]:
-            if st.checkbox(col, value=st.session_state[chk_key], key=chk_key):
-                selected_cols.append(col)
+            st.checkbox(col, key=chk_key)
+    
+    selected_cols = [c for c in numeric_cols if st.session_state.get(f"transform_chk_{c}", False)]
     
     st.caption(f"Selected {len(selected_cols)} features for transformation")
     
@@ -783,7 +771,7 @@ def render_transformation():
     # Show previous result
     if st.session_state.get("transformation_applied", False):
         st.markdown("---")
-        st.subheader("ًPrevious Transformation Result")
+        st.subheader("Previous Transformation Result")
         st.caption(f"Method: {st.session_state.transformation_method}")
         
         result_df = st.session_state.transformation_result_df
@@ -1057,7 +1045,7 @@ def render_balancing():
     # Check if balancing is needed
     unique_classes = before_counts['Class'].nunique()
     if unique_classes <= 1:
-        st.warning("âڑ ï¸ڈ Only one class found. Balancing requires at least 2 classes.")
+        st.warning("Only one class found. Balancing requires at least 2 classes.")
         return
     
     # Input features selection
@@ -1078,7 +1066,7 @@ def render_balancing():
     )
     
     # Method explanation
-    with st.expander("ًں“ڑ When to use each method"):
+    with st.expander("When to use each method"):
         st.dataframe(BALANCING_DISCUSSION, use_container_width=True, hide_index=True)
     
     # Preview button
@@ -1265,7 +1253,7 @@ def render_eda_step():
         
         # Dataset overview
         st.markdown("---")
-        st.subheader("ًں“‹ Dataset Overview")
+        st.subheader(" Dataset Overview")
         
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -1278,7 +1266,7 @@ def render_eda_step():
             st.metric("Missing Values", df.isnull().sum().sum())
         
         # Data info table
-        with st.expander("ًں”چ Data Info", expanded=True):
+        with st.expander("Data Info", expanded=True):
             info_df = pd.DataFrame({
                 'Column': df.columns,
                 'Type': df.dtypes.values,
@@ -1290,7 +1278,7 @@ def render_eda_step():
             st.dataframe(info_df, use_container_width=True)
         
         # Full data preview
-        with st.expander("ًں‘پï¸ڈ Full Data Preview"):
+        with st.expander("Full Data Preview"):
             st.dataframe(df, use_container_width=True, height=400)
         
         # Get numeric columns for visualizations
@@ -1510,7 +1498,7 @@ def render_eda_step():
         # Additional: Value Frequency Analysis
         # =====================================================================
         st.markdown("---")
-        st.subheader("ًں”¤ Value Frequency Analysis")
+        st.subheader(" Value Frequency Analysis")
         
         col1, col2 = st.columns(2)
         
@@ -1566,6 +1554,25 @@ except ImportError:
 
 def build_pipeline(problem_type, model_name):
     """Build sklearn pipeline with appropriate model"""
+    model_name = str(model_name).strip()
+    model_key = model_name.lower()
+    canonical_names = {
+        "decision tree": "Decision Tree",
+        "random forest": "Random Forest",
+        "gradient boosting": "Gradient Boosting",
+        "adaboost": "AdaBoost",
+        "extra trees": "Extra Trees",
+        "logistic regression": "Logistic Regression",
+        "svm": "SVM",
+        "knn": "KNN",
+        "naive bayes": "Naive Bayes",
+        "mlp": "MLP",
+        "xgboost": "XGBoost",
+        "linear regression": "Linear Regression",
+        "svr": "SVR",
+    }
+    model_name = canonical_names.get(model_key, model_name)
+
     needs_scaling = model_name in {
         "Logistic Regression", "SVM", "SVR", "KNN", "MLP", "Linear Regression"
     }
@@ -1596,6 +1603,8 @@ def build_pipeline(problem_type, model_name):
                                       max_iter=1000, random_state=42)
         elif model_name == "XGBoost" and HAS_XGBOOST:
             estimator = XGBClassifier(random_state=42, eval_metric="logloss", n_jobs=-1)
+        elif model_name == "XGBoost" and not HAS_XGBOOST:
+            raise ValueError("XGBoost is not installed. Install with: pip install xgboost")
         else:
             raise ValueError(f"Unknown model: {model_name}")
     else:  # Regression
@@ -1620,6 +1629,8 @@ def build_pipeline(problem_type, model_name):
                                     max_iter=1000, random_state=42)
         elif model_name == "XGBoost" and HAS_XGBOOST:
             estimator = XGBRegressor(random_state=42, n_jobs=-1)
+        elif model_name == "XGBoost" and not HAS_XGBOOST:
+            raise ValueError("XGBoost is not installed. Install with: pip install xgboost")
         else:
             raise ValueError(f"Unknown model: {model_name}")
     
@@ -1730,7 +1741,7 @@ def render_training_step():
         with col3:
             st.metric("Memory", f"{df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
         
-        with st.expander("ًں”چ Data Preview", expanded=True):
+        with st.expander("Data Preview", expanded=True):
             st.dataframe(df.head(100), use_container_width=True, height=300)
         
         # Target column selection
@@ -1784,8 +1795,18 @@ def render_training_step():
         else:
             default_inputs = []
         
+        # Sync checkbox state when selection mode changes
+        prev_select_mode = st.session_state.get("mt_select_mode_prev")
+        if prev_select_mode != select_mode:
+            for col in input_cols:
+                chk_key = f"mt_input_{col}"
+                if select_mode in {"Suggested", "All", "Numeric only", "None"}:
+                    st.session_state[chk_key] = col in default_inputs
+                elif chk_key not in st.session_state:
+                    st.session_state[chk_key] = False
+            st.session_state.mt_select_mode_prev = select_mode
+
         # Create checkboxes
-        selected_inputs = []
         cols_per_row = 4
         
         for i, col in enumerate(input_cols):
@@ -1797,8 +1818,9 @@ def render_training_step():
                 st.session_state[chk_key] = col in default_inputs
             
             with cols[i % cols_per_row]:
-                if st.checkbox(col, value=st.session_state[chk_key], key=chk_key):
-                    selected_inputs.append(col)
+                st.checkbox(col, key=chk_key)
+        
+        selected_inputs = [c for c in input_cols if st.session_state.get(f"mt_input_{c}", False)]
         
         st.caption(f"Selected {len(selected_inputs)} input features")
         st.session_state.mt_input_cols = selected_inputs
@@ -2008,13 +2030,18 @@ def render_training_step():
                 model_discussion = REGRESSION_MODELS
             
             # Model discussion
-            with st.expander("ًں“ڑ Model Selection Guide"):
+            with st.expander("Model Selection Guide"):
                 st.dataframe(model_discussion, use_container_width=True, hide_index=True)
             
             # Model checkboxes
             st.markdown("**Select models to evaluate:**")
             
             select_all = st.checkbox("Select all models", key="mt_select_all")
+            prev_select_all = st.session_state.get("mt_select_all_prev")
+            if prev_select_all is None or prev_select_all != select_all:
+                for model in model_options:
+                    st.session_state[f"mt_model_{model}"] = select_all
+                st.session_state.mt_select_all_prev = select_all
             
             selected_models = []
             cols_per_row = 3
@@ -2024,11 +2051,13 @@ def render_training_step():
                     cols = st.columns(cols_per_row)
                 
                 chk_key = f"mt_model_{model}"
-                default_value = select_all
+                if chk_key not in st.session_state:
+                    st.session_state[chk_key] = select_all
                 
                 with cols[i % cols_per_row]:
-                    if st.checkbox(model, value=default_value, key=chk_key):
-                        selected_models.append(model)
+                    st.checkbox(model, key=chk_key)
+            
+            selected_models = [m for m in model_options if st.session_state.get(f"mt_model_{m}", False)]
             
             if not selected_models:
                 st.warning("Select at least one model")
@@ -2054,7 +2083,7 @@ def render_training_step():
                             pipeline = build_pipeline(problem_type, model_name)
                             
                             # Handle label encoding for classification
-                            if problem_type == "Classification" and model_name == "XGBoost":
+                            if problem_type == "Classification" and str(model_name).strip().lower() == "xgboost":
                                 le = LabelEncoder()
                                 y_train_encoded = le.fit_transform(y_train.astype(str))
                                 pipeline.fit(X_train, y_train_encoded)
@@ -2142,8 +2171,8 @@ def render_training_step():
                                     'Model': model_name,
                                     'Train RMSE': round(train_rmse, 4),
                                     'Test RMSE': round(test_rmse, 4),
-                                    'Train Rآ²': round(train_r2, 4),
-                                    'Test Rآ²': round(test_r2, 4),
+                                    'Train R2': round(train_r2, 4),
+                                    'Test R2': round(test_r2, 4),
                                     'Gap': round(gap, 4),
                                     'Fit Status': fit_status
                                 })
@@ -2188,19 +2217,19 @@ def render_training_step():
             # =====================================================================
             if st.session_state.mt_state.get('results') is not None:
                 st.markdown("---")
-                st.subheader("ًEvaluation Results")
+                st.subheader("Evaluation Results")
                 
                 results_df = st.session_state.mt_state['results']
                 
                 # Highlight best model
                 if 'Test Accuracy' in results_df.columns:
                     best_idx = results_df['Test Accuracy'].idxmax()
-                    st.success(f"ًںڈ† Best Model: **{results_df.loc[best_idx, 'Model']}** "
+                    st.success(f"Best Model: **{results_df.loc[best_idx, 'Model']}** "
                               f"(Test Accuracy: {results_df.loc[best_idx, 'Test Accuracy']:.2%})")
                 elif 'Test Rآ²' in results_df.columns:
-                    best_idx = results_df['Test Rآ²'].idxmax()
-                    st.success(f"ًںڈ† Best Model: **{results_df.loc[best_idx, 'Model']}** "
-                              f"(Test Rآ²: {results_df.loc[best_idx, 'Test Rآ²']:.4f})")
+                    best_idx = results_df['Test R2'].idxmax()
+                    st.success(f"Best Model: **{results_df.loc[best_idx, 'Model']}** "
+                              f"(Test R2:{results_df.loc[best_idx, 'Test R2']:.4f})")
                 
                 # Display results table
                 st.dataframe(results_df, use_container_width=True)
@@ -2250,12 +2279,20 @@ def render_training_step():
                     key="mt_live_model"
                 )
                 
-                # Create input template
+                # Create input template / upload mode
                 st.markdown("**Enter values for prediction:**")
                 
                 # Get original columns
                 original_cols = split['input_cols']
                 original_df = st.session_state.mt_state['df']
+                st.caption("Required input columns: " + ", ".join(original_cols))
+                
+                input_mode = st.radio(
+                    "Prediction input source:",
+                    ["Manual entry", "Upload test table"],
+                    horizontal=True,
+                    key="mt_live_input_source"
+                )
                 
                 # Create input dataframe
                 if 'mt_live_input' not in st.session_state:
@@ -2272,32 +2309,65 @@ def render_training_step():
                     if col in original_df.columns and pd.api.types.is_numeric_dtype(original_df[col]):
                         column_config[col] = st.column_config.NumberColumn(
                             col,
-                            step=0.01,
-                            format="%.4f"
+                            step=0.0001,
+                            format="%.6f"
                         )
                 
-                # Data editor for input
-                live_input_df = st.data_editor(
-                    st.session_state.mt_live_input,
-                    num_rows="dynamic",
-                    use_container_width=True,
-                    height=200,
-                    key="mt_live_editor",
-                    column_config=column_config
-                )
+                if input_mode == "Manual entry":
+                    # Data editor for manual input
+                    live_input_df = st.data_editor(
+                        st.session_state.mt_live_input,
+                        num_rows="dynamic",
+                        use_container_width=True,
+                        height=200,
+                        key="mt_live_editor",
+                        column_config=column_config
+                    )
+                else:
+                    uploaded_live = st.file_uploader(
+                        "Upload test table (CSV/Excel)",
+                        type=["csv", "xlsx", "xls"],
+                        key="mt_live_upload_file",
+                    )
+                    live_url = st.text_input(
+                        "Or paste direct/Raw GitHub URL",
+                        placeholder="https://github.com/user/repo/blob/main/test.csv",
+                        key="mt_live_upload_url",
+                    )
+                    loaded_live_df = load_dataframe_from_source(uploaded_live, live_url)
+                    if loaded_live_df is None:
+                        st.info("Upload a test table or provide a valid GitHub URL.")
+                        live_input_df = pd.DataFrame(columns=original_cols)
+                    else:
+                        st.caption(f"Loaded test table: {loaded_live_df.shape[0]} rows | {loaded_live_df.shape[1]} columns")
+                        live_input_df = st.data_editor(
+                            loaded_live_df,
+                            num_rows="dynamic",
+                            use_container_width=True,
+                            height=260,
+                            key="mt_live_editor_upload",
+                            column_config=column_config
+                        )
                 
                 if st.button(" Predict", key="mt_live_predict", type="primary"):
                     if live_input_df.empty:
                         st.warning("Please enter at least one row for prediction")
                     else:
                         try:
+                            missing_cols = [c for c in original_cols if c not in live_input_df.columns]
+                            if missing_cols:
+                                st.error("Uploaded table is missing required columns: " + ", ".join(missing_cols))
+                                return
+                            
+                            pred_input_df = live_input_df[original_cols].copy()
+                            
                             # Prepare features
-                            X_live, _ = prepare_features(live_input_df, original_cols, split['feature_encoder'])
+                            X_live, _ = prepare_features(pred_input_df, original_cols, split['feature_encoder'])
                             
                             # Train the selected model
                             pipeline = build_pipeline(problem_type, live_model)
                             
-                            if problem_type == "Classification" and live_model == "XGBoost":
+                            if problem_type == "Classification" and str(live_model).strip().lower() == "xgboost":
                                 le = LabelEncoder()
                                 y_train_encoded = le.fit_transform(split['y_train'].astype(str))
                                 pipeline.fit(split['X_train'], y_train_encoded)

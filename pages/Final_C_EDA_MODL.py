@@ -34,7 +34,7 @@ from config.settings import (
 def render_date_features():
     """Render date features (split) interface"""
     st.markdown("Date Features (Split)")
-    st.caption("Split date columns into day, month, year components")
+    st.caption("Split date columns into day, month, year and one time column (hour+minute as total minutes).")
     
     # Optional: Load new table
     render_step_table_loader("date_split", "Date Split")
@@ -86,10 +86,12 @@ def render_date_features():
             preview_df[f"{col}_day"] = parsed.dt.day
             preview_df[f"{col}_month"] = parsed.dt.month
             preview_df[f"{col}_year"] = parsed.dt.year
+            preview_df[f"{col}_hour_minute"] = parsed.dt.hour * 60 + parsed.dt.minute
         except:
             preview_df[f"{col}_day"] = np.nan
             preview_df[f"{col}_month"] = np.nan
             preview_df[f"{col}_year"] = np.nan
+            preview_df[f"{col}_hour_minute"] = np.nan
     
     if drop_original:
         preview_df = preview_df.drop(columns=date_cols, errors='ignore')
@@ -123,6 +125,7 @@ def render_date_features():
                     work_df[f"{col}_day"] = parsed.dt.day
                     work_df[f"{col}_month"] = parsed.dt.month
                     work_df[f"{col}_year"] = parsed.dt.year
+                    work_df[f"{col}_hour_minute"] = parsed.dt.hour * 60 + parsed.dt.minute
                 except:
                     st.warning(f"Could not parse column: {col}")
             
@@ -2456,16 +2459,15 @@ def render_drop_columns():
         return
 
     cols_to_drop = checkbox_select_columns(all_cols, "drop_cols", columns_per_row=3)
+    preview_df = df.drop(columns=cols_to_drop, errors="ignore") if cols_to_drop else df.copy()
 
-    with st.expander("Table before drop", expanded=False):
+    left, right = st.columns(2)
+    with left:
+        st.markdown("**Table Before**")
         st.dataframe(df.head(20), use_container_width=True, height=260)
-
-    if cols_to_drop:
-        preview_df = df.drop(columns=cols_to_drop, errors="ignore")
-        st.markdown("**Preview after drop:**")
+    with right:
+        st.markdown("**Table After**")
         st.dataframe(preview_df.head(20), use_container_width=True, height=260)
-    else:
-        st.info("Select at least one column to preview drop result.")
 
     st.markdown("---")
     c1, c2 = st.columns(2)
@@ -2535,13 +2537,75 @@ def _render_cleaning_step():
 
 
 _ensure_base_session_state()
-st.set_page_config(page_title="Cleaning, EDA, and Model Training", layout="wide")
-st.title("Cleaning, EDA, and Model Training")
+st.set_page_config(
+    page_title="Cleaning, EDA, and Model Training",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-main_tabs = st.tabs(["1. Cleaning Data", "2. EDA", "3. Model Training"])
-with main_tabs[0]:
+st.markdown(
+    """
+    <style>
+    [data-testid="stSidebarNav"],
+    [data-testid="collapsedControl"] {
+        display: none !important;
+    }
+    .main .block-container {
+        padding-top: 1.2rem;
+        padding-bottom: 1.5rem;
+        max-width: 1280px;
+    }
+    .app-hero {
+        border-radius: 14px;
+        padding: 18px 20px;
+        margin-bottom: 10px;
+        background: linear-gradient(120deg, #f4f9ff 0%, #f8fcff 50%, #eef5ff 100%);
+        border: 1px solid #dce8fb;
+    }
+    .app-hero h1 {
+        margin: 0;
+        font-size: 1.8rem;
+        letter-spacing: 0.2px;
+        color: #123a67;
+    }
+    .app-hero p {
+        margin: 6px 0 0 0;
+        color: #36587c;
+        font-size: 0.95rem;
+    }
+    div.stButton > button {
+        border-radius: 10px;
+        font-weight: 600;
+    }
+    div[data-baseweb="tab-list"] button {
+        border-radius: 10px;
+        padding: 0.3rem 0.7rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    """
+    <div class="app-hero">
+        <h1>Cleaning, EDA, and Model Training</h1>
+        <p>Prepare data, explore patterns, train models, and run live predictions in one workspace.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.sidebar.markdown("## Workflow")
+section = st.sidebar.radio(
+    "Go to section",
+    ["Cleaning Data", "EDA", "Model Training"],
+    key="main_section_nav",
+)
+
+if section == "Cleaning Data":
     _render_cleaning_step()
-with main_tabs[1]:
+elif section == "EDA":
     render_eda_step()
-with main_tabs[2]:
+else:
     render_training_step()

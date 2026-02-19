@@ -33,7 +33,7 @@ from config.settings import (
 
 def render_date_features():
     """Render date features (split) interface"""
-    st.markdown("### ًں“… 1.1.2 Date Features (Split)")
+    st.markdown("Date Features (Split)")
     st.caption("Split date columns into day, month, year components")
     
     # Optional: Load new table
@@ -46,7 +46,6 @@ def render_date_features():
     df = st.session_state.df
     all_cols = df.columns.tolist()
     
-    st.markdown("**Select date columns to split:**")
     date_cols = checkbox_select_columns(all_cols, "date_split", columns_per_row=3)
     
     if not date_cols:
@@ -114,7 +113,7 @@ def render_date_features():
         st.session_state.date_split_output_file = file_name
     
     # Apply button
-    if st.button("âœ… Apply Date Split", key="apply_date_split", type="primary"):
+    if st.button("Apply Date Split", key="apply_date_split", type="primary"):
         try:
             work_df = df.copy()
             
@@ -139,7 +138,7 @@ def render_date_features():
             # Save file
             success, path = save_dataframe(work_df, save_folder, file_name)
             if success:
-                st.success(f"âœ… Date split applied and saved to {path}")
+                st.success(f"Date split applied and saved to {path}")
             else:
                 st.warning(f"Date split applied but failed to save: {path}")
             
@@ -151,7 +150,7 @@ def render_date_features():
     # Show previous result
     if st.session_state.get("date_split_applied", False):
         st.markdown("---")
-        st.subheader("ًں“ٹ Previous Date Split Result")
+        st.subheader("ًPrevious Date Split Result")
         st.caption(f"Processed columns: {st.session_state.date_split_columns}")
         
         result_df = st.session_state.date_split_result_df
@@ -160,7 +159,7 @@ def render_date_features():
 
 def render_date_recency():
     """Render date recency/freshness interface"""
-    st.markdown("### âڈ±ï¸ڈ 1.1.3 Date Recency/Freshness")
+    st.markdown("Date Recency/Freshness")
     st.caption("Calculate years since last update (recency feature)")
     
     # Optional: Load new table
@@ -266,7 +265,6 @@ def render_date_recency():
     if remove_old_dates and cols_to_remove:
         preview_df = preview_df.drop(columns=cols_to_remove, errors='ignore')
     
-    st.markdown("**Preview:**")
     st.dataframe(preview_df, use_container_width=True)
     
     # Save options
@@ -285,7 +283,7 @@ def render_date_recency():
         st.session_state.recency_output_file = file_name
     
     # Apply button
-    if st.button("âœ… Apply Recency Transform", key="apply_recency", type="primary"):
+    if st.button(" Apply Recency Transform", key="apply_recency", type="primary"):
         try:
             work_df = df.copy()
             
@@ -312,7 +310,7 @@ def render_date_recency():
             # Save file
             success, path = save_dataframe(work_df, save_folder, file_name)
             if success:
-                st.success(f"âœ… Recency transform applied and saved to {path}")
+                st.success(f"Recency transform applied and saved to {path}")
             else:
                 st.warning(f"Recency applied but failed to save: {path}")
             
@@ -324,7 +322,7 @@ def render_date_recency():
     # Show previous result
     if st.session_state.get("recency_applied", False):
         st.markdown("---")
-        st.subheader("ًں“ٹ Previous Recency Result")
+        st.subheader("ًPrevious Recency Result")
         
         result_df = st.session_state.recency_result_df
         st.dataframe(result_df.head(20), use_container_width=True)
@@ -332,7 +330,7 @@ def render_date_recency():
 
 def render_encoding():
     """Render encoding interface"""
-    st.markdown("### ًں”¤ 1.1.4 Encode Text Columns")
+    st.markdown("Encode Text Columns")
     st.caption("Convert categorical text to numeric values for ML models")
     
     # Optional: Load new table
@@ -348,11 +346,11 @@ def render_encoding():
     obj_cols = df.select_dtypes(include=["object"]).columns.tolist()
     
     if not obj_cols:
-        st.success("âœ… No text columns found - all columns are already numeric")
+        st.success("No text columns found - all columns are already numeric")
         return
     
     # Display object columns summary
-    st.info(f"ًں“ٹ Found {len(obj_cols)} text columns")
+    st.info(f"Found {len(obj_cols)} text columns")
     
     summary_df = pd.DataFrame({
         'Column': obj_cols,
@@ -474,7 +472,7 @@ def render_encoding():
         st.session_state.encoding_output_file = file_name
     
     # Apply button
-    if st.button("âœ… Apply Encoding", key="apply_encoding", type="primary"):
+    if st.button(" Apply Encoding", key="apply_encoding", type="primary"):
         try:
             work_df = df.copy()
             
@@ -526,7 +524,7 @@ def render_encoding():
             # Save file
             success, path = save_dataframe(work_df, save_folder, file_name)
             if success:
-                st.success(f"âœ… Encoding applied and saved to {path}")
+                st.success(f"Encoding applied and saved to {path}")
             else:
                 st.warning(f"Encoding applied but failed to save: {path}")
             
@@ -538,7 +536,7 @@ def render_encoding():
     # Show previous result
     if st.session_state.get("encoding_applied", False):
         st.markdown("---")
-        st.subheader("ًں“ٹ Previous Encoding Result")
+        st.subheader("ًPrevious Encoding Result")
         st.caption(f"Method: {st.session_state.encoding_method}")
         
         result_df = st.session_state.encoding_result_df
@@ -617,7 +615,7 @@ def render_transformation():
         st.info("No numeric columns found for transformation")
         return
     
-    st.info(f"ًں“ٹ Found {len(numeric_cols)} numeric columns")
+    st.info(f"Found {len(numeric_cols)} numeric columns")
     
     # Detect binary columns (should not be transformed)
     binary_cols = detect_binary_columns(df)
@@ -713,7 +711,7 @@ def render_transformation():
     # Preview transformation
     preview_col = st.selectbox("Preview column:", selected_cols, key="transform_preview_col")
     
-    if st.button("ًں‘پï¸ڈ Preview Transformation", key="preview_transform"):
+    if st.button("Preview Transformation", key="preview_transform"):
         preview_df = apply_transformation(df.head(100), selected_cols, method)
         st.session_state.transform_preview_df = preview_df
         st.session_state.transform_preview_method = method
@@ -754,7 +752,7 @@ def render_transformation():
         st.session_state.transform_output_file = file_name
     
     # Apply button
-    if st.button("âœ… Apply Transformation", key="apply_transform", type="primary"):
+    if st.button("Apply Transformation", key="apply_transform", type="primary"):
         try:
             # Store before state
             before_df = df.copy()
@@ -773,7 +771,7 @@ def render_transformation():
             # Save file
             success, path = save_dataframe(transformed_df, save_folder, file_name)
             if success:
-                st.success(f"âœ… Transformation applied and saved to {path}")
+                st.success(f"Transformation applied and saved to {path}")
             else:
                 st.warning(f"Transformation applied but failed to save: {path}")
             
@@ -785,7 +783,7 @@ def render_transformation():
     # Show previous result
     if st.session_state.get("transformation_applied", False):
         st.markdown("---")
-        st.subheader("ًں“ٹ Previous Transformation Result")
+        st.subheader("ًPrevious Transformation Result")
         st.caption(f"Method: {st.session_state.transformation_method}")
         
         result_df = st.session_state.transformation_result_df
@@ -803,7 +801,7 @@ def render_transformation():
 
 def render_zero_handling():
     """Render zero handling interface"""
-    st.markdown("### ًںژ¯ 1.1.6 Zero Handling (Replace 0 with Mean)")
+    st.markdown("Zero Handling (Replace 0 with Mean)")
     st.caption("Replace zero values with column mean (computed from non-zero values)")
     
     # Optional: Load new table
@@ -835,10 +833,10 @@ def render_zero_handling():
             zero_percentages[col] = (zero_count / len(df) * 100)
     
     if not cols_with_zero:
-        st.success("âœ… No zero values found in numeric columns")
+        st.success("No zero values found in numeric columns")
         return
     
-    st.warning(f"ًں“ٹ Found {len(cols_with_zero)} columns with zero values")
+    st.warning(f"Found {len(cols_with_zero)} columns with zero values")
     
     # Display zero statistics
     zero_stats = pd.DataFrame({
@@ -896,7 +894,7 @@ def render_zero_handling():
         st.session_state.zero_output_file = file_name
     
     # Apply button
-    if st.button("âœ… Apply Zero Handling", key="apply_zero", type="primary"):
+    if st.button("Apply Zero Handling", key="apply_zero", type="primary"):
         try:
             work_df = df.copy()
             applied_cols = []
@@ -921,7 +919,7 @@ def render_zero_handling():
                 # Save file
                 success, path = save_dataframe(work_df, save_folder, file_name)
                 if success:
-                    st.success(f"âœ… Zero handling applied to {len(applied_cols)} columns and saved to {path}")
+                    st.success(f"Zero handling applied to {len(applied_cols)} columns and saved to {path}")
                 else:
                     st.warning(f"Zero handling applied but failed to save: {path}")
                 
@@ -935,7 +933,7 @@ def render_zero_handling():
     # Show previous result
     if st.session_state.get("zero_applied", False):
         st.markdown("---")
-        st.subheader("ًں“ٹ Previous Zero Handling Result")
+        st.subheader("ًPrevious Zero Handling Result")
         st.caption(f"Processed columns: {st.session_state.zero_columns}")
         
         result_df = st.session_state.zero_result_df
@@ -1018,7 +1016,7 @@ def apply_resampling(df, target_col, method):
 
 def render_balancing():
     """Render class balancing interface"""
-    st.markdown("### âڑ–ï¸ڈ 1.1.8 Class Balancing")
+    st.markdown("Class Balancing")
     st.caption("Balance target classes for classification problems")
     
     # Optional: Load new table
@@ -1084,7 +1082,7 @@ def render_balancing():
         st.dataframe(BALANCING_DISCUSSION, use_container_width=True, hide_index=True)
     
     # Preview button
-    if st.button("ًں‘پï¸ڈ Preview Balance", key="preview_balance"):
+    if st.button("Preview Balance", key="preview_balance"):
         with st.spinner("Generating preview..."):
             if method == "SMOTE":
                 preview_df, error, used_features, excluded = apply_smote_balancing(
@@ -1149,7 +1147,7 @@ def render_balancing():
         st.session_state.balance_output_file = file_name
     
     # Apply button
-    if st.button("âœ… Apply Balancing", key="apply_balance", type="primary"):
+    if st.button("Apply Balancing", key="apply_balance", type="primary"):
         with st.spinner("Applying balancing..."):
             if method == "SMOTE":
                 balanced_df, error, used_features, excluded = apply_smote_balancing(
@@ -1175,7 +1173,7 @@ def render_balancing():
                 # Save file
                 success, path = save_dataframe(balanced_df, save_folder, file_name)
                 if success:
-                    st.success(f"âœ… Balancing applied and saved to {path}")
+                    st.success(f"Balancing applied and saved to {path}")
                 else:
                     st.warning(f"Balancing applied but failed to save: {path}")
                 
@@ -1188,7 +1186,7 @@ def render_balancing():
     # Show previous balancing result
     if st.session_state.get("balance_applied", False):
         st.markdown("---")
-        st.subheader("ًں“ٹ Previous Balancing Result")
+        st.subheader("ًPrevious Balancing Result")
         st.caption(f"Method: {st.session_state.balance_method}")
         
         result_df = st.session_state.balance_result_df
@@ -1206,12 +1204,12 @@ import seaborn as sns
 
 def render_eda_step():
     """Main EDA step renderer"""
-    st.header("ًں“ٹ Step 2: EDA & Visualization")
+    st.header("Step 2: EDA & Visualization")
     
     # =====================================================================
     # Data Loading for EDA
     # =====================================================================
-    with st.expander("ًں“‚ Load Data for EDA", expanded=True):
+    with st.expander("Load Data for EDA", expanded=True):
         col1, col2 = st.columns(2)
         
         with col1:
@@ -1232,12 +1230,12 @@ def render_eda_step():
         
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button("ًں“¤ Load for EDA", key="load_eda"):
+            if st.button("Load for EDA", key="load_eda"):
                 try:
                     df = load_dataframe_from_source(eda_file, eda_url)
                     if df is not None:
                         st.session_state.eda_df = df.copy()
-                        st.success("âœ… Data loaded for EDA")
+                        st.success("Data loaded for EDA")
                         st.rerun()
                     else:
                         st.error("Please provide a file or valid URL")
@@ -1248,7 +1246,7 @@ def render_eda_step():
             if st.button("Use Current Dataset", key="use_current"):
                 if st.session_state.df is not None:
                     st.session_state.eda_df = st.session_state.df.copy()
-                    st.success("âœ… Using current dataset")
+                    st.success("Using current dataset")
                     st.rerun()
                 else:
                     st.warning("No current dataset found")
@@ -1538,7 +1536,7 @@ def render_eda_step():
             plt.close()
     
     else:
-        st.info("ًں‘† Please load data for EDA analysis")
+        st.info(" Please load data for EDA analysis")
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
@@ -1653,7 +1651,7 @@ def prepare_features(df, input_cols, fit_encoder=None):
 
 def render_training_step():
     """Main model training step renderer"""
-    st.header("ًں¤– Step 3: Model Training")
+    st.header(" Step 3: Model Training")
     
     # Initialize session state for this step
     if 'mt_state' not in st.session_state:
@@ -1672,10 +1670,10 @@ def render_training_step():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("ًں“‚ Use Current Dataset", key="use_current_mt"):
+        if st.button("Use Current Dataset", key="use_current_mt"):
             if st.session_state.df is not None:
                 st.session_state.mt_state['df'] = st.session_state.df.copy()
-                st.success("âœ… Loaded current dataset")
+                st.success("Loaded current dataset")
                 st.rerun()
             else:
                 st.warning("No current dataset found")
@@ -1687,12 +1685,12 @@ def render_training_step():
             key="mt_upload",
             label_visibility="collapsed"
         )
-        if uploaded_file and st.button("ًں“¤ Load", key="load_mt_upload"):
+        if uploaded_file and st.button("Load", key="load_mt_upload"):
             try:
                 df = load_dataframe_from_source(uploaded_file, "")
                 if df is not None:
                     st.session_state.mt_state['df'] = df
-                    st.success(f"âœ… Loaded {uploaded_file.name}")
+                    st.success(f"Loaded {uploaded_file.name}")
                     st.rerun()
             except Exception as e:
                 st.error(f"Error: {e}")
@@ -1704,12 +1702,12 @@ def render_training_step():
             key="mt_github",
             label_visibility="collapsed"
         )
-        if github_url and st.button("ًںŒگ Load", key="load_mt_github"):
+        if github_url and st.button("Load", key="load_mt_github"):
             try:
                 df = load_dataframe_from_source(None, github_url)
                 if df is not None:
                     st.session_state.mt_state['df'] = df
-                    st.success("âœ… Loaded from GitHub")
+                    st.success("Loaded from GitHub")
                     st.rerun()
             except Exception as e:
                 st.error(f"Error: {e}")
@@ -1832,7 +1830,7 @@ def render_training_step():
         
         st.info(f"Split: Train {train_size:.0%} | Validation {val_size:.0%} | Test {test_size:.0%}")
         
-        if st.button("â–¶ï¸ڈ Run Split", key="mt_run_split", type="primary"):
+        if st.button("Run Split", key="mt_run_split", type="primary"):
             with st.spinner("Splitting data..."):
                 try:
                     # Prepare features
@@ -1869,7 +1867,7 @@ def render_training_step():
                         'input_cols': selected_inputs
                     }
                     
-                    st.success("âœ… Data split completed")
+                    st.success("Data split completed")
                     st.rerun()
                     
                 except Exception as e:
@@ -1931,7 +1929,7 @@ def render_training_step():
             with col2:
                 file_prefix = st.text_input("File prefix:", value="data_split", key="mt_split_prefix")
             
-            if st.button("ًں’¾ Save Split Files", key="mt_save_split"):
+            if st.button("Save Split Files", key="mt_save_split"):
                 try:
                     target_dir = os.path.join(os.getcwd(), save_folder)
                     os.makedirs(target_dir, exist_ok=True)
@@ -1967,7 +1965,7 @@ def render_training_step():
                         index=False, encoding='utf-8-sig'
                     )
                     
-                    st.success(f"âœ… Split files saved to {target_dir}")
+                    st.success(f"Split files saved to {target_dir}")
                     
                 except Exception as e:
                     st.error(f"Error saving files: {e}")
@@ -2039,7 +2037,7 @@ def render_training_step():
             st.caption(f"Selected {len(selected_models)} models")
             
             # Training button
-            if st.button("ًںڑ€ Evaluate Selected Models", key="mt_train", type="primary"):
+            if st.button("Evaluate Selected Models", key="mt_train", type="primary"):
                 with st.spinner("Training models... This may take a moment."):
                     results = []
                     predictions = []
@@ -2182,7 +2180,7 @@ def render_training_step():
                     st.session_state.mt_state['results'] = results_df
                     st.session_state.mt_state['predictions'] = pd.concat(predictions, ignore_index=True) if predictions else None
                     
-                    st.success("âœ… Model evaluation completed")
+                    st.success("Model evaluation completed")
                     st.rerun()
             
             # =====================================================================
@@ -2190,7 +2188,7 @@ def render_training_step():
             # =====================================================================
             if st.session_state.mt_state.get('results') is not None:
                 st.markdown("---")
-                st.subheader("ًں“ٹ Evaluation Results")
+                st.subheader("ًEvaluation Results")
                 
                 results_df = st.session_state.mt_state['results']
                 
@@ -2224,10 +2222,10 @@ def render_training_step():
                     if not file_name.endswith('.csv'):
                         file_name += '.csv'
                 
-                if st.button("ًں’¾ Save Results", key="mt_save_results"):
+                if st.button("Save Results", key="mt_save_results"):
                     success, path = save_dataframe(results_df, save_folder, file_name)
                     if success:
-                        st.success(f"âœ… Results saved to {path}")
+                        st.success(f"Results saved to {path}")
                     else:
                         st.error(f"Error saving: {path}")
                 
@@ -2288,7 +2286,7 @@ def render_training_step():
                     column_config=column_config
                 )
                 
-                if st.button("ًں”® Predict", key="mt_live_predict", type="primary"):
+                if st.button(" Predict", key="mt_live_predict", type="primary"):
                     if live_input_df.empty:
                         st.warning("Please enter at least one row for prediction")
                     else:
@@ -2323,14 +2321,14 @@ def render_training_step():
                                 else:
                                     result_df['predicted_' + split['target_col']] = predictions
                             
-                            st.success("âœ… Prediction completed!")
+                            st.success("Prediction completed!")
                             st.dataframe(result_df, use_container_width=True)
                             
                             # Save predictions
-                            if st.button("ًں’¾ Save Live Predictions", key="mt_save_live"):
+                            if st.button("Save Live Predictions", key="mt_save_live"):
                                 success, path = save_dataframe(result_df, save_folder, "live_predictions.csv")
                                 if success:
-                                    st.success(f"âœ… Live predictions saved to {path}")
+                                    st.success(f"Live predictions saved to {path}")
                                 else:
                                     st.error(f"Error saving: {path}")
                             
@@ -2338,7 +2336,7 @@ def render_training_step():
                             st.error(f"Prediction failed: {e}")
     
     else:
-        st.info("ًں‘† Please load a dataset to begin training")
+        st.info("Please load a dataset to begin training")
 
 
 
@@ -2387,7 +2385,6 @@ def render_drop_columns():
         st.warning("Dataset has no columns")
         return
 
-    st.markdown("**Select columns to drop:**")
     cols_to_drop = checkbox_select_columns(all_cols, "drop_cols", columns_per_row=3)
 
     with st.expander("Table before drop", expanded=False):

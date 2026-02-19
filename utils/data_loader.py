@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import streamlit as st
+from utils.helpers import one_shot_checkbox
 
 
 def normalize_github_url(url: str) -> str:
@@ -58,7 +59,6 @@ def save_dataframe(df: pd.DataFrame, folder: str, file_name: str):
 
 def render_step_table_loader(step_key: str, label: str | None = None):
     label = label or "Step"
-    st.caption(f"Optional: Load a new table for {label} from PC/GitHub.")
     c1, c2 = st.columns(2)
     with c1:
         up = st.file_uploader(
@@ -72,7 +72,7 @@ def render_step_table_loader(step_key: str, label: str | None = None):
             placeholder="https://github.com/user/repo/blob/main/data.csv",
             key=f"{step_key}_github_url",
         )
-    if st.button("Load table for this step", key=f"{step_key}_load_btn"):
+    if one_shot_checkbox("Load table for this step", key=f"{step_key}_load_chk"):
         df = load_dataframe_from_source(up, url)
         if df is None:
             st.error("Please upload a file or provide a valid GitHub URL.")

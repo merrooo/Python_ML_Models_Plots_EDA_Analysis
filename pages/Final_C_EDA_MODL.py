@@ -573,7 +573,7 @@ def apply_transformation(df, cols, method):
 
 def render_transformation():
     """Render transformation interface"""
-    st.markdown("### ًں“گ 1.1.5 Feature Transformation")
+    st.markdown("### Feature Transformation")
     st.caption("Scale and transform numerical features to improve model performance")
     
     # Optional: Load new table
@@ -1478,7 +1478,7 @@ def render_eda_step():
         # Additional: Distribution plots for all features
         # =====================================================================
         st.markdown("---")
-        st.subheader("ًں“ˆ Distribution Plots for All Features")
+        st.subheader(" Distribution Plots for All Features")
         
         plot_all = st.checkbox("Show distribution plots for all numeric features", value=False)
         
@@ -1520,11 +1520,127 @@ def render_eda_step():
             st.dataframe(value_counts.to_frame('Count'), use_container_width=True)
         
         with col2:
-            fig, ax = plt.subplots(figsize=(10, max(4, top_n*0.3)))
-            sns.barplot(x=value_counts.values, y=value_counts.index, ax=ax, palette='viridis')
-            ax.set_title(f'Top {top_n} values in {freq_col}')
+            fig, ax = plt.subplots(figsize=(10, 5))
+            value_counts.plot(kind="bar", ax=ax, color="#4e79a7")
+            ax.set_title(f"Top {top_n} values in {freq_col}")
+            ax.set_xlabel(freq_col)
+            ax.set_ylabel("Count")
+            ax.tick_params(axis="x", rotation=45)
+            fig.tight_layout()
             st.pyplot(fig)
             plt.close()
+
+        # =====================================================================
+        # Additional: Feature vs Feature Plot
+        # =====================================================================
+        st.markdown("---")
+        st.subheader(" Feature vs Feature Plot")
+        st.caption("Select any two features to visualize their relationship.")
+
+        all_cols = df.columns.tolist()
+        if len(all_cols) >= 2:
+            col1, col2 = st.columns(2)
+            with col1:
+                x_feature = st.selectbox(
+                    "X feature:",
+                    all_cols,
+                    index=0,
+                    key="eda_pair_x",
+                )
+            with col2:
+                default_y_idx = 1 if len(all_cols) > 1 else 0
+                y_feature = st.selectbox(
+                    "Y feature:",
+                    all_cols,
+                    index=default_y_idx,
+                    key="eda_pair_y",
+                )
+
+            if x_feature == y_feature:
+                st.info("Select two different features.")
+            else:
+                plot_df = df[[x_feature, y_feature]].dropna()
+                if plot_df.empty:
+                    st.warning("No rows available after dropping missing values.")
+                else:
+                    x_is_num = pd.api.types.is_numeric_dtype(df[x_feature])
+                    y_is_num = pd.api.types.is_numeric_dtype(df[y_feature])
+
+                    if x_is_num and y_is_num:
+                        plot_kind = st.radio(
+                            "Plot type:",
+                            ["Scatter", "Line"],
+                            horizontal=True,
+                            key="eda_pair_kind_nn",
+                        )
+                        fig, ax = plt.subplots(figsize=(10, 5))
+                        if plot_kind == "Scatter":
+                            ax.scatter(plot_df[x_feature], plot_df[y_feature], alpha=0.7, color="#2b8cbe")
+                        else:
+                            sorted_df = plot_df.sort_values(by=x_feature)
+                            ax.plot(sorted_df[x_feature], sorted_df[y_feature], color="#2b8cbe")
+                        ax.set_xlabel(x_feature)
+                        ax.set_ylabel(y_feature)
+                        ax.set_title(f"{plot_kind}: {y_feature} vs {x_feature}")
+                        fig.tight_layout()
+                        st.pyplot(fig)
+                        plt.close()
+
+                    elif x_is_num != y_is_num:
+                        numeric_feature = x_feature if x_is_num else y_feature
+                        category_feature = y_feature if x_is_num else x_feature
+                        max_cats = st.slider(
+                            "Max categories to display:",
+                            min_value=5,
+                            max_value=50,
+                            value=15,
+                            key="eda_pair_cat_limit",
+                        )
+                        top_categories = (
+                            plot_df[category_feature].astype(str).value_counts().head(max_cats).index
+                        )
+                        filtered_df = plot_df[plot_df[category_feature].astype(str).isin(top_categories)].copy()
+                        filtered_df[category_feature] = filtered_df[category_feature].astype(str)
+
+                        fig, ax = plt.subplots(figsize=(10, max(4, len(top_categories) * 0.3)))
+                        sns.boxplot(
+                            data=filtered_df,
+                            x=numeric_feature,
+                            y=category_feature,
+                            ax=ax,
+                            color="#8ecae6",
+                        )
+                        ax.set_title(f"{numeric_feature} by {category_feature}")
+                        fig.tight_layout()
+                        st.pyplot(fig)
+                        plt.close()
+
+                    else:
+                        max_cats = st.slider(
+                            "Max categories per axis:",
+                            min_value=3,
+                            max_value=20,
+                            value=10,
+                            key="eda_pair_cc_limit",
+                        )
+                        x_top = plot_df[x_feature].astype(str).value_counts().head(max_cats).index
+                        y_top = plot_df[y_feature].astype(str).value_counts().head(max_cats).index
+                        filtered_df = plot_df[
+                            plot_df[x_feature].astype(str).isin(x_top)
+                            & plot_df[y_feature].astype(str).isin(y_top)
+                        ].copy()
+                        ctab = pd.crosstab(
+                            filtered_df[y_feature].astype(str),
+                            filtered_df[x_feature].astype(str)
+                        )
+                        fig, ax = plt.subplots(figsize=(10, 6))
+                        sns.heatmap(ctab, annot=True, fmt="d", cmap="Blues", ax=ax)
+                        ax.set_title(f"Cross-tab: {y_feature} vs {x_feature}")
+                        fig.tight_layout()
+                        st.pyplot(fig)
+                        plt.close()
+        else:
+            st.info("Need at least 2 columns to create a feature-vs-feature plot.")
     
     else:
         st.info(" Please load data for EDA analysis")
